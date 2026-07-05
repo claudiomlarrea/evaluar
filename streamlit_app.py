@@ -264,22 +264,20 @@ def render_sidebar() -> None:
         st.rerun()
 
     st.sidebar.divider()
-    teacher_total = count_teachers()
-    if teacher_total > 0:
-        label = "docente ya usa" if teacher_total == 1 else "docentes ya usan"
-        st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
-    else:
-        st.sidebar.caption("Herramienta del Observatorio de IA · UCCuyo")
+    teacher_total = _displayed_teacher_count()
+    label = "docente usa" if teacher_total == 1 else "docentes usan"
+    st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
 
 
 def page_home() -> None:
     st.title("Evaluación presencial híbrida")
-    teacher_total = count_teachers()
-    if teacher_total > 0:
-        label = "docente registrado" if teacher_total == 1 else "docentes registrados"
-        st.metric("Comunidad docente", teacher_total, help=f"Cantidad de {label} en EvaluAR")
-    else:
-        st.caption("Plataforma del Observatorio de IA para docentes de la UCCuyo.")
+    teacher_total = _displayed_teacher_count()
+    label = "docente usa" if teacher_total == 1 else "docentes usan"
+    st.metric(
+        "Comunidad docente",
+        teacher_total,
+        help=f"{teacher_total} {label} EvaluAR",
+    )
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(
