@@ -95,29 +95,15 @@ def _app_base_url() -> str:
 
 
 def _render_session_share(code: str, key_prefix: str) -> None:
-    """Indicaciones y botones para compartir URL + código con los alumnos."""
+    """Botones compactos para copiar URL, código o mensaje."""
     code = code.upper()
     base_url = _app_base_url()
     html_id = "".join(ch if ch.isalnum() else "_" for ch in key_prefix)
 
     if base_url:
-        st.markdown(
-            f"""
-            **Enviá a los alumnos (WhatsApp, mail o proyector):**
-            1. URL de EvaluAR: `{base_url}`
-            2. Código del parcial: **`{code}`**
-
-            El alumno abre la URL, elige **«Soy alumno»** e ingresa el código.
-            """
-        )
+        st.caption(f"URL EvaluAR: `{base_url}` · Código: **`{code}`**")
     else:
-        st.markdown(
-            f"""
-            **Enviá a los alumnos:**
-            1. La URL de esta app EvaluAR en Streamlit
-            2. Código del parcial: **`{code}`**
-            """
-        )
+        st.caption(f"Código del parcial: **`{code}`** (copiá también la URL desde el navegador)")
 
     code_js = json.dumps(code)
     base_js = json.dumps(base_url)
@@ -130,47 +116,35 @@ def _render_session_share(code: str, key_prefix: str) -> None:
 
     components.html(
         f"""
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.25rem 0;">
-          <button type="button" id="copy-code-{html_id}"
-            style="flex:1;min-width:150px;padding:0.5rem 0.75rem;border:1px solid #cbd5e1;
-            border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+          <button type="button" id="copy-code-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
+            border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
             Copiar código
           </button>
-          <button type="button" id="copy-url-{html_id}"
-            style="flex:1;min-width:150px;padding:0.5rem 0.75rem;border:1px solid #cbd5e1;
-            border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
-            Copiar URL de EvaluAR
+          <button type="button" id="copy-url-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
+            border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
+            Copiar URL
           </button>
-          <button type="button" id="copy-msg-{html_id}"
-            style="flex:1;min-width:150px;padding:0.5rem 0.75rem;border:1px solid #0d9488;
-            border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;">
-            Copiar mensaje completo
+          <button type="button" id="copy-msg-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
+            border:1px solid #0d9488;border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.85rem;">
+            Copiar mensaje WhatsApp
           </button>
         </div>
         <script>
         document.getElementById("copy-code-{html_id}").onclick = function() {{
             navigator.clipboard.writeText({code_js});
-            this.textContent = "¡Código copiado!";
-            setTimeout(() => {{ this.textContent = "Copiar código"; }}, 2000);
         }};
         document.getElementById("copy-url-{html_id}").onclick = function() {{
             const url = {base_js};
-            if (!url) {{
-                alert("No se pudo detectar la URL. Copiala desde la barra del navegador.");
-                return;
-            }}
-            navigator.clipboard.writeText(url);
-            this.textContent = "¡URL copiada!";
-            setTimeout(() => {{ this.textContent = "Copiar URL de EvaluAR"; }}, 2000);
+            if (url) navigator.clipboard.writeText(url);
+            else alert("Copiá la URL desde la barra del navegador.");
         }};
         document.getElementById("copy-msg-{html_id}").onclick = function() {{
             navigator.clipboard.writeText({message_js});
-            this.textContent = "¡Mensaje copiado!";
-            setTimeout(() => {{ this.textContent = "Copiar mensaje completo"; }}, 2000);
         }};
         </script>
         """,
-        height=52,
+        height=44,
     )
 
 
@@ -615,57 +589,102 @@ def page_exam_detail() -> None:
     if exam.get("description"):
         st.info(exam["description"])
 
-    st.markdown("### Nueva sesión de aula")
-    label = st.text_input("Etiqueta de sesión", placeholder="Comisión A - 05/07/2026")
-    if st.button("Generar link de sesión", type="primary"):
-        session = create_session(exam["id"], label)
-        st.session_state.flash_session_code = session["code"]
-        st.rerun()
-
-    if st.session_state.get("flash_session_code"):
-        st.success(
-            f"Sesión **{st.session_state.flash_session_code}** creada. "
-            "Compartí el link desde la lista de abajo."
-        )
-
-    st.markdown("### Sesiones del parcial")
-    if not exam["sessions"]:
-        st.info("Generá una sesión arriba para obtener el link que usarán los alumnos.")
-    for session in exam["sessions"]:
-        is_new = session["code"] == st.session_state.get("flash_session_code")
-        label_text = session.get("label") or "Sesión"
+    with st.expander("¿Cómo compartir el parcial con los alumnos?", expanded=False):
         st.markdown(
-            f"**{label_text}** · código `{session['code']}`"
-            + (" · **nueva**" if is_new else "")
+            """
+            1. Generá **una sesión** por comisión/parcial (no hace falta crear varias).
+            2. Enviá por WhatsApp la **URL de EvaluAR** y el **código** (botón «Copiar mensaje WhatsApp»).
+            3. Los alumnos rinden en **papel**, entregan el cuadernillo y cargan respuestas en «Soy alumno».
+            4. Acá ves la **planilla de notas** y descargás Excel.
+            """
         )
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            st.write(f"**{session['submission_count']}** alumnos enviaron respuestas")
-            _render_session_share(session["code"], f"session_{session['id']}")
-        with col2:
-            if st.button(
-                "Ver planilla de alumnos",
-                key=f"results_{session['id']}",
-                type="primary",
-                use_container_width=True,
-            ):
-                st.session_state.session_id = session["id"]
-                st.session_state.page = "session_results"
-                st.rerun()
-        st.divider()
 
-    st.markdown("### Clave de respuestas")
-    rows = [
-        {
-            "#": q["order"],
-            "Tipo": question_type_label(q["type"]),
-            "Referencia": q.get("prompt") or "—",
-            "Correcta": q["correct_answer"],
-            "Pts": q["points"],
-        }
-        for q in exam["questions"]
-    ]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.markdown("### Sesión del parcial")
+    col_label, col_btn = st.columns([3, 1])
+    with col_label:
+        label = st.text_input(
+            "Etiqueta (opcional)",
+            placeholder="Comisión A - 05/07/2026",
+            label_visibility="collapsed",
+        )
+    with col_btn:
+        if st.button("Generar sesión", type="primary", use_container_width=True):
+            session = create_session(exam["id"], label)
+            st.session_state.flash_session_code = session["code"]
+            st.rerun()
+
+    sessions = exam["sessions"]
+    if not sessions:
+        st.info("Todavía no hay sesión. Generá una para obtener el código del parcial.")
+    else:
+        if len(sessions) > 1:
+            st.warning(
+                f"Hay **{len(sessions)} sesiones**. Usá **una sola** por parcial para no confundirte. "
+                "Elegí la activa abajo."
+            )
+
+        options = [
+            f"{s['code']} · {(s.get('label') or 'Sin etiqueta')} · {s['submission_count']} envíos"
+            for s in sessions
+        ]
+        default_index = 0
+        flash = st.session_state.get("flash_session_code")
+        if flash:
+            for index, session in enumerate(sessions):
+                if session["code"] == flash:
+                    default_index = index
+                    break
+
+        selected_index = st.selectbox(
+            "Sesión activa",
+            range(len(sessions)),
+            format_func=lambda i: options[i],
+            index=default_index,
+        )
+        active = sessions[selected_index]
+
+        metric1, metric2, metric3 = st.columns(3)
+        metric1.metric("Código", active["code"])
+        metric2.metric("Alumnos", active["submission_count"])
+        metric3.metric("Nota máxima", exam["max_score"])
+
+        if st.button("Ver planilla de alumnos y descargar Excel", type="primary"):
+            st.session_state.session_id = active["id"]
+            st.session_state.page = "session_results"
+            st.rerun()
+
+        st.markdown("**Compartir con alumnos**")
+        _render_session_share(active["code"], "active_session")
+
+        if len(sessions) > 1:
+            with st.expander("Ver todas las sesiones"):
+                st.dataframe(
+                    pd.DataFrame(
+                        [
+                            {
+                                "Código": s["code"],
+                                "Etiqueta": s.get("label") or "—",
+                                "Envíos": s["submission_count"],
+                            }
+                            for s in sessions
+                        ]
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+    with st.expander("Clave de respuestas cargada"):
+        rows = [
+            {
+                "#": q["order"],
+                "Tipo": question_type_label(q["type"]),
+                "Referencia": q.get("prompt") or "—",
+                "Correcta": q["correct_answer"],
+                "Pts": q["points"],
+            }
+            for q in exam["questions"]
+        ]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def page_session_results() -> None:
