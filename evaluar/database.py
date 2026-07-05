@@ -106,7 +106,7 @@ def init_db() -> None:
 
 def _migrate_exams(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(exams)")}
-    for column in ("career", "subject", "career_year"):
+    for column in ("career", "subject", "career_year", "exam_date", "exam_time"):
         if column not in existing:
             conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT")
 
@@ -178,6 +178,8 @@ def create_exam(
     subject: str | None,
     career_year: str | None,
     description: str | None,
+    exam_date: str | None,
+    exam_time: str | None,
     max_score: float,
     show_detail_to_student: bool,
     questions: list[dict[str, Any]],
@@ -198,9 +200,9 @@ def create_exam(
             """
             INSERT INTO exams (
                 id, teacher_id, title, course, career, subject, career_year,
-                description, max_score, show_detail_to_student, created_at
+                description, exam_date, exam_time, max_score, show_detail_to_student, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 exam_id,
@@ -211,6 +213,8 @@ def create_exam(
                 subject.strip() if subject else None,
                 career_year.strip() if career_year else None,
                 description.strip() if description else None,
+                exam_date,
+                exam_time,
                 max_score,
                 1 if show_detail_to_student else 0,
                 utc_now(),

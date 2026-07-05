@@ -33,6 +33,18 @@ def format_datetime(value: str | None) -> str:
         return value
 
 
+def format_exam_schedule(exam_date: str | None, exam_time: str | None = None) -> str | None:
+    if not exam_date:
+        return None
+    try:
+        day = datetime.fromisoformat(exam_date).strftime("%d/%m/%Y")
+    except ValueError:
+        day = exam_date
+    if exam_time:
+        return f"{day} · {exam_time}"
+    return day
+
+
 def question_type_label(qtype: str) -> str:
     return {
         "MULTIPLE_CHOICE": "Opción múltiple",

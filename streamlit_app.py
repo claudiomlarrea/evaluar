@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import date, time, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -24,7 +25,7 @@ from evaluar.database import (
 )
 from evaluar.answer_parser import letters_for_count
 from evaluar.question_builder import TYPE_CHOICES, build_all_questions, default_question_draft
-from evaluar.utils import format_datetime, format_score, is_session_open, question_type_label
+from evaluar.utils import format_datetime, format_exam_schedule, format_score, is_session_open, question_type_label
 
 QUESTIONS_PER_PAGE = 5
 
@@ -309,12 +310,14 @@ def page_panel() -> None:
         st.info("Todavía no hay exámenes. Creá el primero con la clave de respuestas.")
     else:
         for exam in exams:
+            schedule = format_exam_schedule(exam.get("exam_date"), exam.get("exam_time"))
             with st.expander(f"{exam['title']} · {exam['question_count']} preguntas"):
                 st.caption(
                     f"{exam.get('career') or exam.get('course') or 'Sin carrera'} · "
                     f"{exam.get('subject') or ''} · "
                     f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
-                    f"Nota máxima {exam['max_score']} · {exam['session_count']} sesiones"
+                    f"{schedule + ' · ' if schedule else ''}"
+                    f"Nota máxima {exam['max_score']} · {exam['session_count']} códigos"
                 )
                 if st.button("Administrar", key=f"exam_{exam['id']}"):
                     st.session_state.exam_id = exam["id"]
@@ -468,6 +471,23 @@ def page_new_exam() -> None:
             placeholder="Parcial 2",
             help="Ej. Parcial 1, Final, Recuperatorio",
         )
+
+        col_date, col_time = st.columns(2)
+        with col_date:
+            exam_date = st.date_input(
+                "Fecha del parcial *",
+                value=date.today(),
+                format="DD/MM/YYYY",
+                help="Elegí día, mes y año desde el calendario.",
+            )
+        with col_time:
+            exam_time = st.time_input(
+                "Hora del parcial",
+                value=time(9, 0),
+                step=timedelta(minutes=5),
+                help="Podés ajustar la hora manualmente.",
+            )
+
         description = st.text_area("Instrucciones para el aula (opcional)")
 
         col4, col5, col6 = st.columns(3)
@@ -506,6 +526,8 @@ def page_new_exam() -> None:
                         "career_year": career_year.strip(),
                         "title": title.strip(),
                         "description": description.strip(),
+                        "exam_date": exam_date.isoformat(),
+                        "exam_time": exam_time.strftime("%H:%M"),
                         "question_count": int(question_count),
                         "max_score": float(max_score),
                         "show_detail": show_detail,
@@ -530,7 +552,9 @@ def page_new_exam() -> None:
         st.markdown("### 2. Clave de respuestas — pregunta por pregunta")
         st.caption(
             f"{general['career']} · {general['subject']} · Año {general['career_year']} · "
-            f"{general['title']} · {question_count} preguntas"
+            f"{general['title']} · "
+            f"{format_exam_schedule(general.get('exam_date'), general.get('exam_time')) or 'Sin fecha'} · "
+            f"{question_count} preguntas"
         )
 
         start = (current_page - 1) * QUESTIONS_PER_PAGE + 1
@@ -567,6 +591,8 @@ def page_new_exam() -> None:
                         general["subject"],
                         general["career_year"],
                         general.get("description") or None,
+                        general.get("exam_date"),
+                        general.get("exam_time"),
                         general["max_score"],
                         general["show_detail"],
                         questions,
@@ -601,9 +627,11 @@ def page_exam_detail() -> None:
         st.rerun()
 
     st.subheader(exam["title"])
+    schedule = format_exam_schedule(exam.get("exam_date"), exam.get("exam_time"))
     st.caption(
         f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
         f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
+        f"{schedule + ' · ' if schedule else ''}"
         f"{len(exam['questions'])} preguntas · Nota máxima {exam['max_score']}"
     )
     if exam.get("description"):
