@@ -30,8 +30,21 @@ st.set_page_config(
 
 init_db()
 
-DEFAULT_MC = ["A", "B", "C", "D", "E"]
-DEFAULT_MATCH_TARGETS = list("ABCDEFGH")
+DEFAULT_MC = ["A", "B", "C", "D", "E", "F"]
+
+
+def _load_question_options(raw: str, qtype: str) -> tuple[list[str], list[dict[str, str]]]:
+    """Devuelve (opciones MC o targets, ítems de emparejamiento)."""
+    parsed = json.loads(raw)
+    if qtype == "MATCHING":
+        if isinstance(parsed, dict):
+            return parsed.get("targets", DEFAULT_MC), parsed.get("items", [])
+        if isinstance(parsed, list):
+            return DEFAULT_MC, parsed
+        return DEFAULT_MC, []
+    if isinstance(parsed, list):
+        return parsed, []
+    return DEFAULT_MC, []
 
 
 def ensure_state() -> None:
@@ -43,6 +56,7 @@ def ensure_state() -> None:
         "student_code": None,
         "student_step": "identify",
         "student_result": None,
+        "answer_key_draft": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -187,25 +201,41 @@ def page_new_exam() -> None:
     title = st.text_input("Título", placeholder="Parcial 2 - Fisiopatología")
     course = st.text_input("Materia / Cátedra", placeholder="Medicina - 2° año")
     description = st.text_area("Instrucciones para el aula (opcional)")
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         max_score = st.number_input("Nota máxima", min_value=1.0, value=10.0, step=0.5)
     with col2:
         question_count = st.number_input("Cantidad de preguntas", min_value=1, max_value=200, value=50)
-    show_detail = st.checkbox("Mostrar preguntas falladas al alumno", value=True)
+    with col3:
+        show_detail = st.checkbox("Mostrar preguntas falladas al alumno", value=True)
+
+    opt1, opt2 = st.columns(2)
+    with opt1:
+        default_mc_options = st.selectbox(
+            "Opciones en opción múltiple (por defecto)",
+            [3, 4, 5, 6],
+            index=2,
+        )
+    with opt2:
+        default_match_options = st.selectbox(
+            "Opciones destino en emparejamiento (por defecto)",
+            [3, 4, 5, 6],
+            index=3,
+        )
 
     st.markdown("### Clave de respuestas (tipos mixtos)")
     with st.expander("Ver sintaxis y ejemplos", expanded=True):
         st.markdown(
             """
-            **Una línea por pregunta.** Podés indicar el número al inicio (`15:`) o escribir
-            las 50 líneas en orden (línea 1 = pregunta 1).
+            **Una línea por pregunta.** El sufijo **`/N`** indica cuántas opciones tiene
+            esa pregunta (**3 a 6**). Si lo omitís, se usan los valores por defecto de arriba.
 
             | Tipo | Formato | Ejemplo |
             |------|---------|---------|
-            | Opción múltiple | letra A–E | `1: B` o `B` |
-            | Verdadero / Falso | V o F | `2: V` o `VF F` |
-            | Emparejamiento | pares con flecha | `15: a->c, b->f, c->d` |
+            | Opción múltiple (4 opc.) | letra + `/N` | `1/4: B` |
+            | Opción múltiple (6 opc.) | letra + `/N` | `8/6: F` |
+            | Verdadero / Falso | V o F (sin `/N`) | `2: V` |
+            | Emparejamiento (6 destinos) | pares con flecha | `15/6: a->c, b->f, c->d` |
 
             Las líneas que empiezan con `#` se ignoran.
             """
@@ -214,14 +244,14 @@ def page_new_exam() -> None:
             "\n".join(
                 [
                     "# Parcial mixto - 50 preguntas",
-                    "1: B",
+                    "1/5: B",
                     "2: V",
-                    "3: C",
-                    "4: A",
-                    "5: F",
+                    "3/4: C",
+                    "4/5: A",
+                    "5/6: F",
                     "# ... preguntas 6 a 14 ...",
-                    "15: a->c, b->f, c->d",
-                    "16: D",
+                    "15/6: a->c, b->f, c->d",
+                    "16/5: D",
                     "17: V",
                     "# ... completar hasta la pregunta 50 ...",
                 ]
@@ -229,10 +259,38 @@ def page_new_exam() -> None:
             language="text",
         )
 
+    tpl1, tpl2 = st.columns([2, 1])
+    with tpl1:
+        matching_for_template = st.text_input(
+            "Preguntas de emparejamiento para la plantilla (opcional)",
+            placeholder="Ej. 15, 28, 42",
+        )
+    with tpl2:
+        st.write("")
+        st.write("")
+        if st.button("Generar plantilla", use_container_width=True):
+            from evaluar.answer_parser import generate_template
+
+            matching_numbers: list[int] = []
+            if matching_for_template.strip():
+                matching_numbers = [
+                    int(piece.strip())
+                    for piece in matching_for_template.split(",")
+                    if piece.strip()
+                ]
+            st.session_state.answer_key_draft = generate_template(
+                int(question_count),
+                int(default_mc_options),
+                int(default_match_options),
+                matching_numbers,
+            )
+            st.rerun()
+
     answers_text = st.text_area(
         "Respuestas correctas",
         height=280,
-        placeholder="1: B\n2: V\n3: C\n...\n15: a->c, b->f, c->d\n...",
+        key="answer_key_draft",
+        placeholder="1/5: B\n2: V\n...\n15/6: a->c, b->f, c->d\n...",
         help=f"Debés definir las {int(question_count)} preguntas.",
     )
 
@@ -240,12 +298,20 @@ def page_new_exam() -> None:
         try:
             from evaluar.answer_parser import parse_answer_key
 
-            preview = parse_answer_key(answers_text, int(question_count))
+            preview = parse_answer_key(
+                answers_text,
+                int(question_count),
+                int(default_mc_options),
+                int(default_match_options),
+            )
             st.markdown("**Vista previa detectada**")
             preview_rows = [
                 {
                     "#": q["order"],
                     "Tipo": question_type_label(q["type"]),
+                    "Opciones": len(q["options"]["targets"])
+                    if q["type"] == "MATCHING" and isinstance(q["options"], dict)
+                    else len(q["options"]),
                     "Correcta": q["correct_answer"],
                 }
                 for q in preview[:15]
@@ -264,7 +330,12 @@ def page_new_exam() -> None:
         try:
             from evaluar.answer_parser import AnswerKeyError, parse_answer_key
 
-            questions = parse_answer_key(answers_text, int(question_count))
+            questions = parse_answer_key(
+                answers_text,
+                int(question_count),
+                int(default_mc_options),
+                int(default_match_options),
+            )
             exam_id = create_exam(
                 st.session_state.teacher["id"],
                 title,
@@ -459,8 +530,8 @@ def page_student() -> None:
             st.caption(question["prompt"])
         qtype = question["type"]
         if qtype == "MULTIPLE_CHOICE":
-            options = json.loads(question["options"])
-            choice = st.radio("Opción", options, key=f"ans_{order}", horizontal=True)
+            mc_options, _ = _load_question_options(question["options"], qtype)
+            choice = st.radio("Opción", mc_options, key=f"ans_{order}", horizontal=True)
             answers[str(order)] = choice
         elif qtype == "TRUE_FALSE":
             choice = st.radio(
@@ -472,13 +543,13 @@ def page_student() -> None:
             )
             answers[str(order)] = choice
         else:
-            pairs = json.loads(question["options"])
+            targets, pairs = _load_question_options(question["options"], qtype)
             matching: dict[str, str] = {}
             for pair in pairs:
                 left_key = str(pair["left"]).lower()
                 letter = st.selectbox(
                     f"Ítem **{pair['left']}** →",
-                    ["", *DEFAULT_MATCH_TARGETS],
+                    ["", *targets],
                     key=f"ans_{order}_{left_key}",
                 )
                 if letter:
