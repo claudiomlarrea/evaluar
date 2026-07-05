@@ -83,52 +83,59 @@ def _student_query(code: str) -> str:
 
 
 def _render_session_share(code: str, key_prefix: str) -> None:
-    """Botones para copiar sin seleccionar texto (evita el atajo C de Streamlit Cloud)."""
+    """Botones para copiar sin seleccionar texto (compatible con Streamlit Cloud)."""
     code = code.upper()
     query = _student_query(code)
     html_id = "".join(ch if ch.isalnum() else "_" for ch in key_prefix)
     st.markdown(f"Código: **`{code}`**")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.copy_button(
-            "Copiar código",
-            code,
-            use_container_width=True,
-            key=f"{key_prefix}_copy_code",
-        )
-    with col2:
-        st.copy_button(
-            "Copiar ?code=...",
-            query,
-            use_container_width=True,
-            key=f"{key_prefix}_copy_query",
-        )
-    with col3:
-        components.html(
-            f"""
-            <button id="copy-{html_id}" type="button" style="
-                width:100%;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;border-radius:0.5rem;
-                background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;
-            ">Copiar link completo</button>
-            <script>
-            document.getElementById("copy-{html_id}").onclick = function() {{
-                const url = window.location.origin + window.location.pathname + "{query}";
-                navigator.clipboard.writeText(url).then(() => {{
-                    this.textContent = "¡Copiado!";
-                    this.style.background = "#059669";
-                    setTimeout(() => {{
-                        this.textContent = "Copiar link completo";
-                        this.style.background = "#0d9488";
-                    }}, 2000);
+
+    components.html(
+        f"""
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+          <button type="button" class="evaluar-copy" data-copy="{code}"
+            style="flex:1;min-width:140px;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;
+            border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
+            Copiar código
+          </button>
+          <button type="button" class="evaluar-copy" data-copy="{query}"
+            style="flex:1;min-width:140px;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;
+            border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
+            Copiar ?code=...
+          </button>
+          <button type="button" id="copy-full-{html_id}"
+            style="flex:1;min-width:140px;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;
+            border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;">
+            Copiar link completo
+          </button>
+        </div>
+        <script>
+        document.querySelectorAll(".evaluar-copy").forEach(function(btn) {{
+            btn.onclick = function() {{
+                navigator.clipboard.writeText(btn.dataset.copy).then(function() {{
+                    const prev = btn.textContent;
+                    btn.textContent = "¡Copiado!";
+                    setTimeout(function() {{ btn.textContent = prev; }}, 2000);
                 }});
             }};
-            </script>
-            """,
-            height=48,
-        )
+        }});
+        document.getElementById("copy-full-{html_id}").onclick = function() {{
+            const url = window.location.origin + window.location.pathname + "{query}";
+            navigator.clipboard.writeText(url).then(() => {{
+                this.textContent = "¡Copiado!";
+                this.style.background = "#059669";
+                setTimeout(() => {{
+                    this.textContent = "Copiar link completo";
+                    this.style.background = "#0d9488";
+                }}, 2000);
+            }});
+        }};
+        </script>
+        """,
+        height=56,
+    )
     st.caption(
         "Usá **Copiar link completo** para WhatsApp o mail. "
-        "No selecciones texto a mano (en Streamlit Cloud la tecla C abre un menú de desarrollador)."
+        "No selecciones texto a mano (la tecla C abre un menú de desarrollador en Streamlit)."
     )
 
 
