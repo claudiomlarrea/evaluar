@@ -86,29 +86,32 @@ def _render_session_share(code: str, key_prefix: str) -> None:
     """Botones para copiar sin seleccionar texto (evita el atajo C de Streamlit Cloud)."""
     code = code.upper()
     query = _student_query(code)
+    html_id = "".join(ch if ch.isalnum() else "_" for ch in key_prefix)
     st.markdown(f"Código: **`{code}`**")
     col1, col2, col3 = st.columns(3)
-    col1.copy_button(
-        "Copiar código",
-        code,
-        use_container_width=True,
-        key=f"{key_prefix}_copy_code",
-    )
-    col2.copy_button(
-        "Copiar ?code=...",
-        query,
-        use_container_width=True,
-        key=f"{key_prefix}_copy_query",
-    )
+    with col1:
+        st.copy_button(
+            "Copiar código",
+            code,
+            use_container_width=True,
+            key=f"{key_prefix}_copy_code",
+        )
+    with col2:
+        st.copy_button(
+            "Copiar ?code=...",
+            query,
+            use_container_width=True,
+            key=f"{key_prefix}_copy_query",
+        )
     with col3:
         components.html(
             f"""
-            <button id="copy-{key_prefix}" type="button" style="
+            <button id="copy-{html_id}" type="button" style="
                 width:100%;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;border-radius:0.5rem;
                 background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;
             ">Copiar link completo</button>
             <script>
-            document.getElementById("copy-{key_prefix}").onclick = function() {{
+            document.getElementById("copy-{html_id}").onclick = function() {{
                 const url = window.location.origin + window.location.pathname + "{query}";
                 navigator.clipboard.writeText(url).then(() => {{
                     this.textContent = "¡Copiado!";
