@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 
 import pandas as pd
@@ -49,6 +50,31 @@ def _load_question_options(raw: str, qtype: str) -> tuple[list[str], list[dict[s
     if isinstance(parsed, list):
         return parsed, []
     return DEFAULT_MC, []
+
+
+def _submissions_dataframe(submissions: list[dict], max_score: float) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Apellido y nombre": s["student_name"],
+                "DNI / Matrícula": s["student_dni"],
+                "Nota": s["score"],
+                "Aciertos": s["correct_count"],
+                "Errores": s["wrong_count"],
+                "Sin responder": s["unanswered_count"],
+                "Preguntas falladas": ", ".join(map(str, s["wrong_questions"])) or "—",
+                "Fecha de envío": format_datetime(s["submitted_at"]),
+            }
+            for s in submissions
+        ]
+    )
+
+
+def _export_excel(df: pd.DataFrame) -> bytes:
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Notas")
+    return buffer.getvalue()
 
 
 def ensure_state() -> None:
@@ -475,17 +501,28 @@ def page_exam_detail() -> None:
         st.success(f"Sesión creada. Código: **{session['code']}**")
         st.code(f"?code={session['code']}", language="text")
 
-    st.markdown("### Sesiones")
+    st.markdown("### Sesiones del parcial")
     if not exam["sessions"]:
-        st.info("Todavía no hay sesiones.")
+        st.info("Generá una sesión arriba para obtener el link que usarán los alumnos.")
     for session in exam["sessions"]:
-        with st.expander(f"{session.get('label') or 'Sesión'} · {session['code']}"):
-            st.write(f"Envíos: {session['submission_count']}")
+        header = f"{session.get('label') or 'Sesión'} · código **{session['code']}**"
+        st.markdown(header)
+        col1, col2, col3 = st.columns([2, 2, 2])
+        with col1:
+            st.write(f"**{session['submission_count']}** alumnos enviaron respuestas")
+        with col2:
             st.code(f"?code={session['code']}", language="text")
-            if st.button("Ver resultados", key=f"results_{session['id']}"):
+        with col3:
+            if st.button(
+                "Ver planilla de alumnos",
+                key=f"results_{session['id']}",
+                type="primary",
+                use_container_width=True,
+            ):
                 st.session_state.session_id = session["id"]
                 st.session_state.page = "session_results"
                 st.rerun()
+        st.divider()
 
     st.markdown("### Clave de respuestas")
     rows = [
@@ -512,7 +549,7 @@ def page_session_results() -> None:
         st.error("Sesión no encontrada.")
         return
 
-    if st.button("← Volver"):
+    if st.button("← Volver al examen"):
         st.session_state.page = "exam_detail"
         st.rerun()
 
@@ -520,39 +557,45 @@ def page_session_results() -> None:
     exam = data["exam"]
     submissions = data["submissions"]
 
-    st.subheader(f"Resultados · {exam['title']}")
-    st.caption(f"Sesión {session['code']} · {session.get('label') or ''}")
+    st.subheader("Planilla de alumnos")
+    st.caption(
+        f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
+        f"{exam['title']} · Sesión {session['code']}"
+    )
 
     avg = 0 if not submissions else sum(s["score"] for s in submissions) / len(submissions)
     c1, c2, c3 = st.columns(3)
-    c1.metric("Alumnos", len(submissions))
+    c1.metric("Alumnos evaluados", len(submissions))
     c2.metric("Promedio", format_score(avg))
-    c3.metric("Estado", "Abierta" if session["is_active"] else "Cerrada")
+    c3.metric("Nota máxima", exam["max_score"])
 
     if submissions:
-        df = pd.DataFrame(
-            [
-                {
-                    "Alumno": s["student_name"],
-                    "DNI": s["student_dni"],
-                    "Nota": s["score"],
-                    "Aciertos": s["correct_count"],
-                    "Errores": s["wrong_count"],
-                    "Preguntas falladas": ", ".join(map(str, s["wrong_questions"])) or "—",
-                    "Enviado": format_datetime(s["submitted_at"]),
-                }
-                for s in submissions
-            ]
-        )
+        df = _submissions_dataframe(submissions, float(exam["max_score"]))
         st.dataframe(df, use_container_width=True, hide_index=True)
-        st.download_button(
-            "Exportar CSV",
-            data=df.to_csv(index=False).encode("utf-8"),
-            file_name=f"evaluar-{session['code']}.csv",
-            mime="text/csv",
-        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                "Descargar Excel (.xlsx)",
+                data=_export_excel(df),
+                file_name=f"evaluar-{session['code']}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                use_container_width=True,
+            )
+        with col2:
+            st.download_button(
+                "Descargar CSV",
+                data=df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"evaluar-{session['code']}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
     else:
-        st.info("Todavía no hay respuestas enviadas.")
+        st.info(
+            "Todavía no hay respuestas. Compartí el link con los alumnos después del parcial "
+            f"en papel: `?code={session['code']}`"
+        )
 
     st.markdown("### Estadísticas por pregunta")
     st.dataframe(pd.DataFrame(data["question_stats"]), use_container_width=True, hide_index=True)
