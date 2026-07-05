@@ -82,45 +82,96 @@ def _student_query(code: str) -> str:
     return f"?code={code.upper()}"
 
 
+def _app_base_url() -> str:
+    """URL pública de la app (Streamlit Cloud)."""
+    try:
+        headers = st.context.headers
+        host = headers.get("Host") or headers.get("host", "")
+        if host:
+            return f"https://{host.split(',')[0].strip().rstrip('/')}"
+    except Exception:
+        pass
+    return ""
+
+
 def _render_session_share(code: str, key_prefix: str) -> None:
-    """Botones para copiar código o link completo (compatible con Streamlit Cloud)."""
+    """Indicaciones y botones para compartir URL + código con los alumnos."""
     code = code.upper()
-    query = _student_query(code)
+    base_url = _app_base_url()
     html_id = "".join(ch if ch.isalnum() else "_" for ch in key_prefix)
+
+    if base_url:
+        st.markdown(
+            f"""
+            **Enviá a los alumnos (WhatsApp, mail o proyector):**
+            1. URL de EvaluAR: `{base_url}`
+            2. Código del parcial: **`{code}`**
+
+            El alumno abre la URL, elige **«Soy alumno»** e ingresa el código.
+            """
+        )
+    else:
+        st.markdown(
+            f"""
+            **Enviá a los alumnos:**
+            1. La URL de esta app EvaluAR en Streamlit
+            2. Código del parcial: **`{code}`**
+            """
+        )
+
+    code_js = json.dumps(code)
+    base_js = json.dumps(base_url)
+    message_js = json.dumps(
+        "Parcial en papel. Después cargá tus respuestas en EvaluAR:\n"
+        + (f"{base_url}\n" if base_url else "")
+        + f"Código de sesión: {code}\n"
+        + "En la app elegí «Soy alumno» e ingresá el código."
+    )
 
     components.html(
         f"""
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.25rem 0;">
           <button type="button" id="copy-code-{html_id}"
-            style="flex:1;min-width:160px;padding:0.5rem 0.75rem;border:1px solid #cbd5e1;
+            style="flex:1;min-width:150px;padding:0.5rem 0.75rem;border:1px solid #cbd5e1;
             border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
-            Copiar código ({code})
+            Copiar código
           </button>
-          <button type="button" id="copy-full-{html_id}"
-            style="flex:1;min-width:160px;padding:0.5rem 0.75rem;border:1px solid #0d9488;
+          <button type="button" id="copy-url-{html_id}"
+            style="flex:1;min-width:150px;padding:0.5rem 0.75rem;border:1px solid #cbd5e1;
+            border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
+            Copiar URL de EvaluAR
+          </button>
+          <button type="button" id="copy-msg-{html_id}"
+            style="flex:1;min-width:150px;padding:0.5rem 0.75rem;border:1px solid #0d9488;
             border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;">
-            Copiar link para alumnos
+            Copiar mensaje completo
           </button>
         </div>
         <script>
         document.getElementById("copy-code-{html_id}").onclick = function() {{
-            navigator.clipboard.writeText("{code}").then(() => {{
-                this.textContent = "¡Código copiado!";
-                setTimeout(() => {{ this.textContent = "Copiar código ({code})"; }}, 2000);
-            }});
+            navigator.clipboard.writeText({code_js});
+            this.textContent = "¡Código copiado!";
+            setTimeout(() => {{ this.textContent = "Copiar código"; }}, 2000);
         }};
-        document.getElementById("copy-full-{html_id}").onclick = function() {{
-            const url = window.location.origin + window.location.pathname + "{query}";
-            navigator.clipboard.writeText(url).then(() => {{
-                this.textContent = "¡Link copiado!";
-                setTimeout(() => {{ this.textContent = "Copiar link para alumnos"; }}, 2000);
-            }});
+        document.getElementById("copy-url-{html_id}").onclick = function() {{
+            const url = {base_js};
+            if (!url) {{
+                alert("No se pudo detectar la URL. Copiala desde la barra del navegador.");
+                return;
+            }}
+            navigator.clipboard.writeText(url);
+            this.textContent = "¡URL copiada!";
+            setTimeout(() => {{ this.textContent = "Copiar URL de EvaluAR"; }}, 2000);
+        }};
+        document.getElementById("copy-msg-{html_id}").onclick = function() {{
+            navigator.clipboard.writeText({message_js});
+            this.textContent = "¡Mensaje copiado!";
+            setTimeout(() => {{ this.textContent = "Copiar mensaje completo"; }}, 2000);
         }};
         </script>
         """,
         height=52,
     )
-    st.caption("Compartí el **link para alumnos** por WhatsApp o mail.")
 
 
 def ensure_state() -> None:
