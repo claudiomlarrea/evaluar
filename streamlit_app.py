@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import io
 import json
+import base64
+import html
 from datetime import date, time, timedelta
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -28,10 +31,14 @@ from evaluar.question_builder import TYPE_CHOICES, build_all_questions, default_
 from evaluar.utils import format_datetime, format_exam_schedule, format_score, is_session_open, question_type_label
 
 QUESTIONS_PER_PAGE = 5
+ROOT_DIR = Path(__file__).resolve().parent
+LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
+OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
+INSTITUTION_NAME = "Universidad Católica de Cuyo"
 
 st.set_page_config(
     page_title="EvaluAR",
-    page_icon="📝",
+    page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "📝",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -172,15 +179,47 @@ def ensure_state() -> None:
             st.session_state[key] = value
 
 
+def _logo_base64() -> str:
+    if LOGO_PATH.is_file():
+        return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    return ""
+
+
 def render_header() -> None:
+    obs = html.escape(OBSERVATORIO_NAME)
+    inst = html.escape(INSTITUTION_NAME)
+    b64 = _logo_base64()
+    if b64:
+        logo_html = (
+            f'<img src="data:image/jpeg;base64,{b64}" alt="Logo {obs}" '
+            'class="evaluar-logo" />'
+        )
+    else:
+        logo_html = (
+            '<div style="background:#044A30;color:white;width:56px;height:56px;'
+            'border-radius:50%;display:flex;align-items:center;justify-content:center;'
+            'font-weight:700;">E</div>'
+        )
+
     st.markdown(
-        """
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-          <div style="background:#0d9488;color:white;width:42px;height:42px;border-radius:12px;
-                      display:flex;align-items:center;justify-content:center;font-weight:700;">E</div>
+        f"""
+        <style>
+        .evaluar-logo {{
+            display: block;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #044A30;
+            box-shadow: 0 2px 8px rgba(4, 74, 48, 0.15);
+        }}
+        </style>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+          {logo_html}
           <div>
-            <div style="font-size:1.4rem;font-weight:700;">EvaluAR</div>
+            <div style="font-size:1.4rem;font-weight:700;color:#044A30;">EvaluAR</div>
             <div style="color:#64748b;font-size:0.9rem;">Examen en papel. Corrección digital.</div>
+            <div style="color:#94a3b8;font-size:0.78rem;margin-top:2px;">{obs} · {inst}</div>
           </div>
         </div>
         """,
