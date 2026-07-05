@@ -9,7 +9,7 @@ Sistema híbrido de evaluación presencial para universidades. Los alumnos rinde
 1. Subí este repositorio a GitHub.
 2. Entrá a [share.streamlit.io](https://share.streamlit.io).
 3. **New app** → elegí el repo `evaluar`.
-4. **Main file path:** `streamlit_app.py`
+4. **Main file path:** `app.py`
 5. Deploy.
 
 ### Link para alumnos
