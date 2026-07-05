@@ -7,6 +7,7 @@ import json
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from evaluar.database import (
     create_exam,
@@ -77,6 +78,57 @@ def _export_excel(df: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
+def _student_query(code: str) -> str:
+    return f"?code={code.upper()}"
+
+
+def _render_session_share(code: str, key_prefix: str) -> None:
+    """Botones para copiar sin seleccionar texto (evita el atajo C de Streamlit Cloud)."""
+    code = code.upper()
+    query = _student_query(code)
+    st.markdown(f"Código: **`{code}`**")
+    col1, col2, col3 = st.columns(3)
+    col1.copy_button(
+        "Copiar código",
+        code,
+        use_container_width=True,
+        key=f"{key_prefix}_copy_code",
+    )
+    col2.copy_button(
+        "Copiar ?code=...",
+        query,
+        use_container_width=True,
+        key=f"{key_prefix}_copy_query",
+    )
+    with col3:
+        components.html(
+            f"""
+            <button id="copy-{key_prefix}" type="button" style="
+                width:100%;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;border-radius:0.5rem;
+                background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;
+            ">Copiar link completo</button>
+            <script>
+            document.getElementById("copy-{key_prefix}").onclick = function() {{
+                const url = window.location.origin + window.location.pathname + "{query}";
+                navigator.clipboard.writeText(url).then(() => {{
+                    this.textContent = "¡Copiado!";
+                    this.style.background = "#059669";
+                    setTimeout(() => {{
+                        this.textContent = "Copiar link completo";
+                        this.style.background = "#0d9488";
+                    }}, 2000);
+                }});
+            }};
+            </script>
+            """,
+            height=48,
+        )
+    st.caption(
+        "Usá **Copiar link completo** para WhatsApp o mail. "
+        "No selecciones texto a mano (en Streamlit Cloud la tecla C abre un menú de desarrollador)."
+    )
+
+
 def ensure_state() -> None:
     defaults = {
         "teacher": None,
@@ -91,6 +143,7 @@ def ensure_state() -> None:
         "exam_wizard_general": {},
         "exam_wizard_drafts": [],
         "exam_wizard_page": 1,
+        "last_created_session_code": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -520,8 +573,12 @@ def page_exam_detail() -> None:
     label = st.text_input("Etiqueta de sesión", placeholder="Comisión A - 05/07/2026")
     if st.button("Generar link de sesión", type="primary"):
         session = create_session(exam["id"], label)
-        st.success(f"Sesión creada. Código: **{session['code']}**")
-        st.code(f"?code={session['code']}", language="text")
+        st.session_state.last_created_session_code = session["code"]
+        st.rerun()
+
+    if st.session_state.get("last_created_session_code"):
+        st.success("Sesión creada correctamente.")
+        _render_session_share(st.session_state.last_created_session_code, "new_session")
 
     st.markdown("### Sesiones del parcial")
     if not exam["sessions"]:
@@ -529,12 +586,11 @@ def page_exam_detail() -> None:
     for session in exam["sessions"]:
         header = f"{session.get('label') or 'Sesión'} · código **{session['code']}**"
         st.markdown(header)
-        col1, col2, col3 = st.columns([2, 2, 2])
+        col1, col2 = st.columns([1, 1])
         with col1:
             st.write(f"**{session['submission_count']}** alumnos enviaron respuestas")
+            _render_session_share(session["code"], f"session_{session['id']}")
         with col2:
-            st.code(f"?code={session['code']}", language="text")
-        with col3:
             if st.button(
                 "Ver planilla de alumnos",
                 key=f"results_{session['id']}",
