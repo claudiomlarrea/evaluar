@@ -1,0 +1,26 @@
+# EvaluAR - Streamlit
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+
+# Datos locales
+/data/
+*.db
+
+# Next.js legacy (si quedara algo)
+/node_modules/
+/.next/
+/out/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Streamlit secrets local
+.streamlit/secrets.toml
