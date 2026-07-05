@@ -31,6 +31,7 @@ st.set_page_config(
 init_db()
 
 DEFAULT_MC = ["A", "B", "C", "D", "E"]
+DEFAULT_MATCH_TARGETS = list("ABCDEFGH")
 
 
 def ensure_state() -> None:
@@ -186,94 +187,84 @@ def page_new_exam() -> None:
     title = st.text_input("Título", placeholder="Parcial 2 - Fisiopatología")
     course = st.text_input("Materia / Cátedra", placeholder="Medicina - 2° año")
     description = st.text_area("Instrucciones para el aula (opcional)")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         max_score = st.number_input("Nota máxima", min_value=1.0, value=10.0, step=0.5)
     with col2:
         question_count = st.number_input("Cantidad de preguntas", min_value=1, max_value=200, value=50)
-    with col3:
-        default_type = st.selectbox(
-            "Tipo por defecto",
-            ["MULTIPLE_CHOICE", "TRUE_FALSE", "MATCHING"],
-            format_func=question_type_label,
-        )
     show_detail = st.checkbox("Mostrar preguntas falladas al alumno", value=True)
 
-    st.markdown("### Clave de respuestas")
-    st.caption(
-        "Ingresá una respuesta por línea (A–E para opción múltiple, V/F para verdadero-falso). "
-        "Debe haber exactamente una línea por pregunta."
-    )
+    st.markdown("### Clave de respuestas (tipos mixtos)")
+    with st.expander("Ver sintaxis y ejemplos", expanded=True):
+        st.markdown(
+            """
+            **Una línea por pregunta.** Podés indicar el número al inicio (`15:`) o escribir
+            las 50 líneas en orden (línea 1 = pregunta 1).
+
+            | Tipo | Formato | Ejemplo |
+            |------|---------|---------|
+            | Opción múltiple | letra A–E | `1: B` o `B` |
+            | Verdadero / Falso | V o F | `2: V` o `VF F` |
+            | Emparejamiento | pares con flecha | `15: a->c, b->f, c->d` |
+
+            Las líneas que empiezan con `#` se ignoran.
+            """
+        )
+        st.code(
+            "\n".join(
+                [
+                    "# Parcial mixto - 50 preguntas",
+                    "1: B",
+                    "2: V",
+                    "3: C",
+                    "4: A",
+                    "5: F",
+                    "# ... preguntas 6 a 14 ...",
+                    "15: a->c, b->f, c->d",
+                    "16: D",
+                    "17: V",
+                    "# ... completar hasta la pregunta 50 ...",
+                ]
+            ),
+            language="text",
+        )
 
     answers_text = st.text_area(
-        "Respuestas correctas (una por línea)",
-        height=220,
-        placeholder="\n".join(["B", "V", "A", "C"] + ["A"] * 46),
-        help=f"Necesitás {int(question_count)} líneas para este examen.",
+        "Respuestas correctas",
+        height=280,
+        placeholder="1: B\n2: V\n3: C\n...\n15: a->c, b->f, c->d\n...",
+        help=f"Debés definir las {int(question_count)} preguntas.",
     )
+
+    if answers_text.strip():
+        try:
+            from evaluar.answer_parser import parse_answer_key
+
+            preview = parse_answer_key(answers_text, int(question_count))
+            st.markdown("**Vista previa detectada**")
+            preview_rows = [
+                {
+                    "#": q["order"],
+                    "Tipo": question_type_label(q["type"]),
+                    "Correcta": q["correct_answer"],
+                }
+                for q in preview[:15]
+            ]
+            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
+            if len(preview) > 15:
+                st.caption(f"Mostrando 15 de {len(preview)} preguntas.")
+        except Exception as exc:
+            st.warning(f"Revisá la clave: {exc}")
 
     if st.button("Crear examen", type="primary"):
         if not title.strip():
             st.error("El título es obligatorio.")
             return
 
-        lines = [line.strip().upper() for line in answers_text.strip().splitlines() if line.strip()]
-        if len(lines) != int(question_count):
-            st.error(
-                f"Debés ingresar exactamente {int(question_count)} respuestas. "
-                f"Recibimos {len(lines)}."
-            )
-            return
-
-        questions: list[dict] = []
-        for index, answer in enumerate(lines, start=1):
-            if default_type == "TRUE_FALSE" and answer not in {"V", "F"}:
-                st.error(f"Línea {index}: use V o F.")
-                return
-            if default_type == "MULTIPLE_CHOICE" and answer not in DEFAULT_MC:
-                st.error(f"Línea {index}: use A, B, C, D o E.")
-                return
-
-            if default_type == "TRUE_FALSE":
-                questions.append(
-                    {
-                        "order": index,
-                        "type": "TRUE_FALSE",
-                        "prompt": None,
-                        "options": ["V", "F"],
-                        "correct_answer": answer,
-                        "points": 1,
-                    }
-                )
-            elif default_type == "MULTIPLE_CHOICE":
-                questions.append(
-                    {
-                        "order": index,
-                        "type": "MULTIPLE_CHOICE",
-                        "prompt": None,
-                        "options": DEFAULT_MC,
-                        "correct_answer": answer,
-                        "points": 1,
-                    }
-                )
-            else:
-                questions.append(
-                    {
-                        "order": index,
-                        "type": "MATCHING",
-                        "prompt": None,
-                        "options": [
-                            {"left": "Ítem 1", "right": ""},
-                            {"left": "Ítem 2", "right": ""},
-                            {"left": "Ítem 3", "right": ""},
-                            {"left": "Ítem 4", "right": ""},
-                        ],
-                        "correct_answer": {"1": "A", "2": "B", "3": "C", "4": "D"},
-                        "points": 1,
-                    }
-                )
-
         try:
+            from evaluar.answer_parser import AnswerKeyError, parse_answer_key
+
+            questions = parse_answer_key(answers_text, int(question_count))
             exam_id = create_exam(
                 st.session_state.teacher["id"],
                 title,
@@ -287,6 +278,8 @@ def page_new_exam() -> None:
             st.session_state.page = "exam_detail"
             st.success("Examen creado.")
             st.rerun()
+        except AnswerKeyError as exc:
+            st.error(str(exc))
         except Exception as exc:
             st.error(f"No se pudo crear el examen: {exc}")
 
@@ -481,14 +474,15 @@ def page_student() -> None:
         else:
             pairs = json.loads(question["options"])
             matching: dict[str, str] = {}
-            for idx, pair in enumerate(pairs, start=1):
+            for pair in pairs:
+                left_key = str(pair["left"]).lower()
                 letter = st.selectbox(
-                    f"{idx}. {pair['left']}",
-                    ["", *DEFAULT_MC],
-                    key=f"ans_{order}_{idx}",
+                    f"Ítem **{pair['left']}** →",
+                    ["", *DEFAULT_MATCH_TARGETS],
+                    key=f"ans_{order}_{left_key}",
                 )
                 if letter:
-                    matching[str(idx)] = letter
+                    matching[left_key] = letter
             answers[str(order)] = json.dumps(matching)
 
     if page_num == total_pages and st.button("Enviar respuestas", type="primary"):
