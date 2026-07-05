@@ -83,60 +83,44 @@ def _student_query(code: str) -> str:
 
 
 def _render_session_share(code: str, key_prefix: str) -> None:
-    """Botones para copiar sin seleccionar texto (compatible con Streamlit Cloud)."""
+    """Botones para copiar código o link completo (compatible con Streamlit Cloud)."""
     code = code.upper()
     query = _student_query(code)
     html_id = "".join(ch if ch.isalnum() else "_" for ch in key_prefix)
-    st.markdown(f"Código: **`{code}`**")
 
     components.html(
         f"""
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem;">
-          <button type="button" class="evaluar-copy" data-copy="{code}"
-            style="flex:1;min-width:140px;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin:0.25rem 0;">
+          <button type="button" id="copy-code-{html_id}"
+            style="flex:1;min-width:160px;padding:0.5rem 0.75rem;border:1px solid #cbd5e1;
             border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
-            Copiar código
-          </button>
-          <button type="button" class="evaluar-copy" data-copy="{query}"
-            style="flex:1;min-width:140px;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;
-            border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.875rem;">
-            Copiar ?code=...
+            Copiar código ({code})
           </button>
           <button type="button" id="copy-full-{html_id}"
-            style="flex:1;min-width:140px;padding:0.45rem 0.75rem;border:1px solid #cbd5e1;
+            style="flex:1;min-width:160px;padding:0.5rem 0.75rem;border:1px solid #0d9488;
             border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.875rem;">
-            Copiar link completo
+            Copiar link para alumnos
           </button>
         </div>
         <script>
-        document.querySelectorAll(".evaluar-copy").forEach(function(btn) {{
-            btn.onclick = function() {{
-                navigator.clipboard.writeText(btn.dataset.copy).then(function() {{
-                    const prev = btn.textContent;
-                    btn.textContent = "¡Copiado!";
-                    setTimeout(function() {{ btn.textContent = prev; }}, 2000);
-                }});
-            }};
-        }});
+        document.getElementById("copy-code-{html_id}").onclick = function() {{
+            navigator.clipboard.writeText("{code}").then(() => {{
+                this.textContent = "¡Código copiado!";
+                setTimeout(() => {{ this.textContent = "Copiar código ({code})"; }}, 2000);
+            }});
+        }};
         document.getElementById("copy-full-{html_id}").onclick = function() {{
             const url = window.location.origin + window.location.pathname + "{query}";
             navigator.clipboard.writeText(url).then(() => {{
-                this.textContent = "¡Copiado!";
-                this.style.background = "#059669";
-                setTimeout(() => {{
-                    this.textContent = "Copiar link completo";
-                    this.style.background = "#0d9488";
-                }}, 2000);
+                this.textContent = "¡Link copiado!";
+                setTimeout(() => {{ this.textContent = "Copiar link para alumnos"; }}, 2000);
             }});
         }};
         </script>
         """,
-        height=56,
+        height=52,
     )
-    st.caption(
-        "Usá **Copiar link completo** para WhatsApp o mail. "
-        "No selecciones texto a mano (la tecla C abre un menú de desarrollador en Streamlit)."
-    )
+    st.caption("Compartí el **link para alumnos** por WhatsApp o mail.")
 
 
 def ensure_state() -> None:
@@ -154,6 +138,7 @@ def ensure_state() -> None:
         "exam_wizard_drafts": [],
         "exam_wizard_page": 1,
         "last_created_session_code": None,
+        "flash_session_code": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -583,19 +568,25 @@ def page_exam_detail() -> None:
     label = st.text_input("Etiqueta de sesión", placeholder="Comisión A - 05/07/2026")
     if st.button("Generar link de sesión", type="primary"):
         session = create_session(exam["id"], label)
-        st.session_state.last_created_session_code = session["code"]
+        st.session_state.flash_session_code = session["code"]
         st.rerun()
 
-    if st.session_state.get("last_created_session_code"):
-        st.success("Sesión creada correctamente.")
-        _render_session_share(st.session_state.last_created_session_code, "new_session")
+    if st.session_state.get("flash_session_code"):
+        st.success(
+            f"Sesión **{st.session_state.flash_session_code}** creada. "
+            "Compartí el link desde la lista de abajo."
+        )
 
     st.markdown("### Sesiones del parcial")
     if not exam["sessions"]:
         st.info("Generá una sesión arriba para obtener el link que usarán los alumnos.")
     for session in exam["sessions"]:
-        header = f"{session.get('label') or 'Sesión'} · código **{session['code']}**"
-        st.markdown(header)
+        is_new = session["code"] == st.session_state.get("flash_session_code")
+        label_text = session.get("label") or "Sesión"
+        st.markdown(
+            f"**{label_text}** · código `{session['code']}`"
+            + (" · **nueva**" if is_new else "")
+        )
         col1, col2 = st.columns([1, 1])
         with col1:
             st.write(f"**{session['submission_count']}** alumnos enviaron respuestas")
