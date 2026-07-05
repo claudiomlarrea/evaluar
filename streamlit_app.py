@@ -271,13 +271,6 @@ def render_sidebar() -> None:
 
 def page_home() -> None:
     st.title("Evaluación presencial híbrida")
-    teacher_total = _displayed_teacher_count()
-    label = "docente usa" if teacher_total == 1 else "docentes usan"
-    st.metric(
-        "Comunidad docente",
-        teacher_total,
-        help=f"{teacher_total} {label} EvaluAR",
-    )
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(
