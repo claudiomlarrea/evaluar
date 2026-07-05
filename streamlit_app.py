@@ -589,42 +589,56 @@ def page_exam_detail() -> None:
     if exam.get("description"):
         st.info(exam["description"])
 
-    with st.expander("¿Cómo compartir el parcial con los alumnos?", expanded=False):
+    with st.expander("¿Cómo funciona el día del parcial?", expanded=False):
         st.markdown(
             """
-            1. Generá **una sesión** por comisión/parcial (no hace falta crear varias).
-            2. Enviá por WhatsApp la **URL de EvaluAR** y el **código** (botón «Copiar mensaje WhatsApp»).
-            3. Los alumnos rinden en **papel**, entregan el cuadernillo y cargan respuestas en «Soy alumno».
-            4. Acá ves la **planilla de notas** y descargás Excel.
+            **Antes del parcial:** ya cargaste el examen y la clave de respuestas (al crear el examen).
+
+            **El día del parcial:**
+            1. Generá el **código del parcial** (botón de abajo) — **una sola vez** por comisión.
+            2. Enviá a los alumnos la **URL de EvaluAR** + el **código** (WhatsApp).
+            3. Rinden en **papel** en el aula; recogen los cuadernillos.
+            4. Los alumnos entran a EvaluAR → **Soy alumno** → cargan sus respuestas con el código.
+            5. Vos ves acá la **planilla de notas** y descargás Excel.
+
+            El código **no es** para rendir online: es para **cargar respuestas después** del parcial en papel.
             """
         )
 
-    st.markdown("### Sesión del parcial")
+    st.markdown("### Código del parcial para alumnos")
+    st.info(
+        "**Generar código** crea el identificador (ej. HG3QK5DR) que los alumnos usarán "
+        "**después** de rendir en papel para marcar sus respuestas en el celular."
+    )
+
     col_label, col_btn = st.columns([3, 1])
     with col_label:
         label = st.text_input(
-            "Etiqueta (opcional)",
-            placeholder="Comisión A - 05/07/2026",
-            label_visibility="collapsed",
+            "Nombre de la comisión (opcional)",
+            placeholder="Ej. Comisión A - turno mañana",
         )
     with col_btn:
-        if st.button("Generar sesión", type="primary", use_container_width=True):
+        st.write("")
+        st.write("")
+        if st.button("Generar código", type="primary", use_container_width=True):
             session = create_session(exam["id"], label)
             st.session_state.flash_session_code = session["code"]
             st.rerun()
 
     sessions = exam["sessions"]
     if not sessions:
-        st.info("Todavía no hay sesión. Generá una para obtener el código del parcial.")
+        st.warning(
+            "Todavía no hay código. Hacé clic en **Generar código** antes de compartir con la comisión."
+        )
     else:
         if len(sessions) > 1:
             st.warning(
-                f"Hay **{len(sessions)} sesiones**. Usá **una sola** por parcial para no confundirte. "
-                "Elegí la activa abajo."
+                f"Hay **{len(sessions)} códigos** generados. Usá **uno solo** por parcial. "
+                "Elegí el correcto abajo."
             )
 
         options = [
-            f"{s['code']} · {(s.get('label') or 'Sin etiqueta')} · {s['submission_count']} envíos"
+            f"{s['code']} · {(s.get('label') or 'Sin etiqueta')} · {s['submission_count']} alumnos cargaron"
             for s in sessions
         ]
         default_index = 0
@@ -636,7 +650,7 @@ def page_exam_detail() -> None:
                     break
 
         selected_index = st.selectbox(
-            "Sesión activa",
+            "Código activo de este parcial",
             range(len(sessions)),
             format_func=lambda i: options[i],
             index=default_index,
@@ -644,20 +658,20 @@ def page_exam_detail() -> None:
         active = sessions[selected_index]
 
         metric1, metric2, metric3 = st.columns(3)
-        metric1.metric("Código", active["code"])
-        metric2.metric("Alumnos", active["submission_count"])
+        metric1.metric("Código para alumnos", active["code"])
+        metric2.metric("Respuestas cargadas", active["submission_count"])
         metric3.metric("Nota máxima", exam["max_score"])
 
-        if st.button("Ver planilla de alumnos y descargar Excel", type="primary"):
+        if st.button("Ver planilla de notas y descargar Excel", type="primary"):
             st.session_state.session_id = active["id"]
             st.session_state.page = "session_results"
             st.rerun()
 
-        st.markdown("**Compartir con alumnos**")
+        st.markdown("**Enviar a la comisión (después de rendir en papel)**")
         _render_session_share(active["code"], "active_session")
 
         if len(sessions) > 1:
-            with st.expander("Ver todas las sesiones"):
+            with st.expander("Ver todos los códigos generados"):
                 st.dataframe(
                     pd.DataFrame(
                         [
