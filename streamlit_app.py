@@ -19,7 +19,11 @@ from evaluar.database import (
     register_teacher,
     submit_answers,
 )
+from evaluar.answer_parser import letters_for_count
+from evaluar.question_builder import TYPE_CHOICES, build_all_questions, default_question_draft
 from evaluar.utils import format_datetime, format_score, is_session_open, question_type_label
+
+QUESTIONS_PER_PAGE = 5
 
 st.set_page_config(
     page_title="EvaluAR",
@@ -57,6 +61,10 @@ def ensure_state() -> None:
         "student_step": "identify",
         "student_result": None,
         "answer_key_draft": "",
+        "exam_wizard_step": "general",
+        "exam_wizard_general": {},
+        "exam_wizard_drafts": [],
+        "exam_wizard_page": 1,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -182,13 +190,116 @@ def page_panel() -> None:
     for exam in exams:
         with st.expander(f"{exam['title']} · {exam['question_count']} preguntas"):
             st.caption(
-                f"{exam.get('course') or 'Sin materia'} · "
+                f"{exam.get('career') or exam.get('course') or 'Sin carrera'} · "
+                f"{exam.get('subject') or ''} · "
+                f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
                 f"Nota máxima {exam['max_score']} · {exam['session_count']} sesiones"
             )
             if st.button("Administrar", key=f"exam_{exam['id']}"):
                 st.session_state.exam_id = exam["id"]
                 st.session_state.page = "exam_detail"
                 st.rerun()
+
+
+def _render_question_editor(question_number: int) -> None:
+    type_label = st.radio(
+        "Tipo de pregunta",
+        list(TYPE_CHOICES.keys()),
+        horizontal=True,
+        key=f"q{question_number}_type_label",
+    )
+    qtype = TYPE_CHOICES[type_label]
+
+    if qtype == "MULTIPLE_CHOICE":
+        option_count = st.selectbox(
+            "Cantidad de opciones (distractores)",
+            [3, 4, 5, 6],
+            index=2,
+            key=f"q{question_number}_option_count",
+        )
+        options = letters_for_count(int(option_count))
+        st.selectbox(
+            "Respuesta correcta",
+            options,
+            key=f"q{question_number}_mc_answer",
+        )
+
+    elif qtype == "TRUE_FALSE":
+        st.radio(
+            "Respuesta correcta",
+            ["V", "F"],
+            format_func=lambda value: "Verdadero" if value == "V" else "Falso",
+            horizontal=True,
+            key=f"q{question_number}_vf_answer",
+        )
+
+    else:
+        col1, col2 = st.columns(2)
+        with col1:
+            target_count = st.selectbox(
+                "Cantidad de opciones destino",
+                [3, 4, 5, 6],
+                index=3,
+                key=f"q{question_number}_target_count",
+            )
+        with col2:
+            item_count = st.selectbox(
+                "Cantidad de ítems a emparejar",
+                [3, 4, 5, 6],
+                index=0,
+                key=f"q{question_number}_item_count",
+            )
+
+        targets = letters_for_count(int(target_count))
+        labels = [chr(ord("a") + index) for index in range(int(item_count))]
+        st.caption("Indicá con qué opción se empareja cada ítem.")
+        for label in labels:
+            st.selectbox(
+                f"Ítem {label} →",
+                targets,
+                key=f"q{question_number}_match_{label}",
+            )
+
+
+def _collect_question_draft(question_number: int) -> dict:
+    type_label = st.session_state.get(f"q{question_number}_type_label", "Opción múltiple")
+    qtype = TYPE_CHOICES[type_label]
+    draft = {"order": question_number, "type": qtype}
+
+    if qtype == "MULTIPLE_CHOICE":
+        draft["option_count"] = int(
+            st.session_state.get(f"q{question_number}_option_count", 5)
+        )
+        draft["mc_answer"] = st.session_state.get(f"q{question_number}_mc_answer", "A")
+    elif qtype == "TRUE_FALSE":
+        draft["vf_answer"] = st.session_state.get(f"q{question_number}_vf_answer", "V")
+    else:
+        item_count = int(st.session_state.get(f"q{question_number}_item_count", 3))
+        draft["target_count"] = int(
+            st.session_state.get(f"q{question_number}_target_count", 6)
+        )
+        draft["item_count"] = item_count
+        labels = [chr(ord("a") + index) for index in range(item_count)]
+        draft["matching_answers"] = {
+            label: st.session_state.get(f"q{question_number}_match_{label}", "A")
+            for label in labels
+        }
+
+    return draft
+
+
+def _init_question_widgets(question_count: int) -> None:
+    for number in range(1, question_count + 1):
+        if f"q{number}_type_label" not in st.session_state:
+            defaults = default_question_draft(number)
+            st.session_state[f"q{number}_type_label"] = "Opción múltiple"
+            st.session_state[f"q{number}_option_count"] = defaults["option_count"]
+            st.session_state[f"q{number}_mc_answer"] = defaults["mc_answer"]
+            st.session_state[f"q{number}_vf_answer"] = defaults["vf_answer"]
+            st.session_state[f"q{number}_target_count"] = defaults["target_count"]
+            st.session_state[f"q{number}_item_count"] = defaults["item_count"]
+            for label in defaults["matching_items"]:
+                st.session_state[f"q{number}_match_{label}"] = defaults["matching_answers"][label]
 
 
 def page_new_exam() -> None:
@@ -198,161 +309,139 @@ def page_new_exam() -> None:
         return
 
     st.subheader("Nuevo examen")
-    title = st.text_input("Título", placeholder="Parcial 2 - Fisiopatología")
-    course = st.text_input("Materia / Cátedra", placeholder="Medicina - 2° año")
-    description = st.text_area("Instrucciones para el aula (opcional)")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        max_score = st.number_input("Nota máxima", min_value=1.0, value=10.0, step=0.5)
-    with col2:
-        question_count = st.number_input("Cantidad de preguntas", min_value=1, max_value=200, value=50)
-    with col3:
-        show_detail = st.checkbox("Mostrar preguntas falladas al alumno", value=True)
+    step = st.session_state.exam_wizard_step
 
-    opt1, opt2 = st.columns(2)
-    with opt1:
-        default_mc_options = st.selectbox(
-            "Opciones en opción múltiple (por defecto)",
-            [3, 4, 5, 6],
-            index=2,
+    if step == "general":
+        st.markdown("### 1. Datos de la carrera y del examen")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            career = st.text_input("Carrera *", placeholder="Medicina")
+        with col2:
+            subject = st.text_input("Asignatura *", placeholder="Fisiopatología")
+        with col3:
+            career_year = st.text_input("Año de la carrera *", placeholder="2°")
+
+        title = st.text_input(
+            "Nombre del examen *",
+            placeholder="Parcial 2",
+            help="Ej. Parcial 1, Final, Recuperatorio",
         )
-    with opt2:
-        default_match_options = st.selectbox(
-            "Opciones destino en emparejamiento (por defecto)",
-            [3, 4, 5, 6],
-            index=3,
-        )
+        description = st.text_area("Instrucciones para el aula (opcional)")
 
-    st.markdown("### Clave de respuestas (tipos mixtos)")
-    with st.expander("Ver sintaxis y ejemplos", expanded=True):
-        st.markdown(
-            """
-            **Una línea por pregunta.** El sufijo **`/N`** indica cuántas opciones tiene
-            esa pregunta (**3 a 6**). Si lo omitís, se usan los valores por defecto de arriba.
-
-            | Tipo | Formato | Ejemplo |
-            |------|---------|---------|
-            | Opción múltiple (4 opc.) | letra + `/N` | `1/4: B` |
-            | Opción múltiple (6 opc.) | letra + `/N` | `8/6: F` |
-            | Verdadero / Falso | V o F (sin `/N`) | `2: V` |
-            | Emparejamiento (6 destinos) | pares con flecha | `15/6: a->c, b->f, c->d` |
-
-            Las líneas que empiezan con `#` se ignoran.
-            """
-        )
-        st.code(
-            "\n".join(
-                [
-                    "# Parcial mixto - 50 preguntas",
-                    "1/5: B",
-                    "2: V",
-                    "3/4: C",
-                    "4/5: A",
-                    "5/6: F",
-                    "# ... preguntas 6 a 14 ...",
-                    "15/6: a->c, b->f, c->d",
-                    "16/5: D",
-                    "17: V",
-                    "# ... completar hasta la pregunta 50 ...",
-                ]
-            ),
-            language="text",
-        )
-
-    tpl1, tpl2 = st.columns([2, 1])
-    with tpl1:
-        matching_for_template = st.text_input(
-            "Preguntas de emparejamiento para la plantilla (opcional)",
-            placeholder="Ej. 15, 28, 42",
-        )
-    with tpl2:
-        st.write("")
-        st.write("")
-        if st.button("Generar plantilla", use_container_width=True):
-            from evaluar.answer_parser import generate_template
-
-            matching_numbers: list[int] = []
-            if matching_for_template.strip():
-                matching_numbers = [
-                    int(piece.strip())
-                    for piece in matching_for_template.split(",")
-                    if piece.strip()
-                ]
-            st.session_state.answer_key_draft = generate_template(
-                int(question_count),
-                int(default_mc_options),
-                int(default_match_options),
-                matching_numbers,
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            question_count = st.number_input(
+                "Cantidad total de preguntas *",
+                min_value=1,
+                max_value=200,
+                value=50,
             )
+        with col5:
+            max_score = st.number_input("Nota máxima", min_value=1.0, value=10.0, step=0.5)
+        with col6:
+            show_detail = st.checkbox("Mostrar preguntas falladas al alumno", value=True)
+
+        st.info(
+            "En el siguiente paso configurarás **cada pregunta**: tipo, cantidad de opciones "
+            "(si corresponde) y respuesta correcta."
+        )
+
+        nav1, nav2 = st.columns([1, 1])
+        with nav1:
+            if st.button("← Volver al panel"):
+                st.session_state.page = "panel"
+                st.rerun()
+        with nav2:
+            if st.button("Continuar → Clave de respuestas", type="primary"):
+                if not career.strip() or not subject.strip() or not career_year.strip():
+                    st.error("Completá carrera, asignatura y año.")
+                elif not title.strip():
+                    st.error("Completá el nombre del examen.")
+                else:
+                    st.session_state.exam_wizard_general = {
+                        "career": career.strip(),
+                        "subject": subject.strip(),
+                        "career_year": career_year.strip(),
+                        "title": title.strip(),
+                        "description": description.strip(),
+                        "question_count": int(question_count),
+                        "max_score": float(max_score),
+                        "show_detail": show_detail,
+                    }
+                    _init_question_widgets(int(question_count))
+                    st.session_state.exam_wizard_step = "questions"
+                    st.session_state.exam_wizard_page = 1
+                    st.rerun()
+
+    else:
+        general = st.session_state.exam_wizard_general
+        if not general:
+            st.session_state.exam_wizard_step = "general"
             st.rerun()
-
-    answers_text = st.text_area(
-        "Respuestas correctas",
-        height=280,
-        key="answer_key_draft",
-        placeholder="1/5: B\n2: V\n...\n15/6: a->c, b->f, c->d\n...",
-        help=f"Debés definir las {int(question_count)} preguntas.",
-    )
-
-    if answers_text.strip():
-        try:
-            from evaluar.answer_parser import parse_answer_key
-
-            preview = parse_answer_key(
-                answers_text,
-                int(question_count),
-                int(default_mc_options),
-                int(default_match_options),
-            )
-            st.markdown("**Vista previa detectada**")
-            preview_rows = [
-                {
-                    "#": q["order"],
-                    "Tipo": question_type_label(q["type"]),
-                    "Opciones": len(q["options"]["targets"])
-                    if q["type"] == "MATCHING" and isinstance(q["options"], dict)
-                    else len(q["options"]),
-                    "Correcta": q["correct_answer"],
-                }
-                for q in preview[:15]
-            ]
-            st.dataframe(pd.DataFrame(preview_rows), use_container_width=True, hide_index=True)
-            if len(preview) > 15:
-                st.caption(f"Mostrando 15 de {len(preview)} preguntas.")
-        except Exception as exc:
-            st.warning(f"Revisá la clave: {exc}")
-
-    if st.button("Crear examen", type="primary"):
-        if not title.strip():
-            st.error("El título es obligatorio.")
             return
 
-        try:
-            from evaluar.answer_parser import AnswerKeyError, parse_answer_key
+        question_count = int(general["question_count"])
+        total_pages = max(1, (question_count + QUESTIONS_PER_PAGE - 1) // QUESTIONS_PER_PAGE)
+        current_page = int(st.session_state.exam_wizard_page)
+        current_page = max(1, min(current_page, total_pages))
 
-            questions = parse_answer_key(
-                answers_text,
-                int(question_count),
-                int(default_mc_options),
-                int(default_match_options),
-            )
-            exam_id = create_exam(
-                st.session_state.teacher["id"],
-                title,
-                course,
-                description,
-                float(max_score),
-                show_detail,
-                questions,
-            )
-            st.session_state.exam_id = exam_id
-            st.session_state.page = "exam_detail"
-            st.success("Examen creado.")
-            st.rerun()
-        except AnswerKeyError as exc:
-            st.error(str(exc))
-        except Exception as exc:
-            st.error(f"No se pudo crear el examen: {exc}")
+        st.markdown("### 2. Clave de respuestas — pregunta por pregunta")
+        st.caption(
+            f"{general['career']} · {general['subject']} · Año {general['career_year']} · "
+            f"{general['title']} · {question_count} preguntas"
+        )
+
+        start = (current_page - 1) * QUESTIONS_PER_PAGE + 1
+        end = min(question_count, start + QUESTIONS_PER_PAGE - 1)
+        st.progress(min(current_page / total_pages, 1.0))
+        st.write(f"Configurando preguntas **{start}** a **{end}** de **{question_count}**")
+
+        for number in range(start, end + 1):
+            with st.expander(f"Pregunta {number}", expanded=True):
+                _render_question_editor(number)
+
+        nav1, nav2, nav3, nav4 = st.columns(4)
+        with nav1:
+            if st.button("← Datos generales"):
+                st.session_state.exam_wizard_step = "general"
+                st.rerun()
+        with nav2:
+            if current_page > 1 and st.button("← Página anterior"):
+                st.session_state.exam_wizard_page = current_page - 1
+                st.rerun()
+        with nav3:
+            if current_page < total_pages and st.button("Página siguiente →"):
+                st.session_state.exam_wizard_page = current_page + 1
+                st.rerun()
+        with nav4:
+            if st.button("Crear examen", type="primary"):
+                try:
+                    drafts = [_collect_question_draft(number) for number in range(1, question_count + 1)]
+                    questions = build_all_questions(drafts)
+                    exam_id = create_exam(
+                        st.session_state.teacher["id"],
+                        general["title"],
+                        general["career"],
+                        general["subject"],
+                        general["career_year"],
+                        general.get("description") or None,
+                        general["max_score"],
+                        general["show_detail"],
+                        questions,
+                    )
+                    st.session_state.exam_id = exam_id
+                    st.session_state.exam_wizard_step = "general"
+                    st.session_state.exam_wizard_general = {}
+                    st.session_state.exam_wizard_page = 1
+                    st.session_state.page = "exam_detail"
+                    st.success("Examen creado.")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception as exc:
+                    st.error(f"No se pudo crear el examen: {exc}")
+
 
 
 def page_exam_detail() -> None:
@@ -372,8 +461,9 @@ def page_exam_detail() -> None:
 
     st.subheader(exam["title"])
     st.caption(
-        f"{exam.get('course') or 'Sin materia'} · {len(exam['questions'])} preguntas · "
-        f"Nota máxima {exam['max_score']}"
+        f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
+        f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
+        f"{len(exam['questions'])} preguntas · Nota máxima {exam['max_score']}"
     )
     if exam.get("description"):
         st.info(exam["description"])
@@ -484,7 +574,13 @@ def page_student() -> None:
     questions = payload["questions"]
 
     st.subheader(exam["title"])
-    st.caption(f"{exam.get('course') or ''} · {session.get('label') or ''}")
+    parts = [
+        exam.get("career"),
+        exam.get("subject"),
+        f"Año {exam['career_year']}" if exam.get("career_year") else None,
+        session.get("label"),
+    ]
+    st.caption(" · ".join(part for part in parts if part))
 
     if not is_session_open(session):
         st.error("Esta sesión no está abierta para envíos.")

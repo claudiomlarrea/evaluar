@@ -101,6 +101,14 @@ def init_db() -> None:
             );
             """
         )
+        _migrate_exams(conn)
+
+
+def _migrate_exams(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(exams)")}
+    for column in ("career", "subject", "career_year"):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT")
 
 
 def register_teacher(name: str, pin: str) -> dict[str, Any]:
@@ -146,25 +154,42 @@ def list_exams(teacher_id: str) -> list[dict[str, Any]]:
 def create_exam(
     teacher_id: str,
     title: str,
-    course: str | None,
+    career: str | None,
+    subject: str | None,
+    career_year: str | None,
     description: str | None,
     max_score: float,
     show_detail_to_student: bool,
     questions: list[dict[str, Any]],
 ) -> str:
+    course = " · ".join(
+        piece
+        for piece in [
+            career.strip() if career else None,
+            subject.strip() if subject else None,
+            f"Año {career_year.strip()}" if career_year and career_year.strip() else None,
+        ]
+        if piece
+    ) or None
+
     exam_id = generate_id()
     with get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO exams (id, teacher_id, title, course, description, max_score,
-                               show_detail_to_student, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO exams (
+                id, teacher_id, title, course, career, subject, career_year,
+                description, max_score, show_detail_to_student, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 exam_id,
                 teacher_id,
                 title.strip(),
-                course.strip() if course else None,
+                course,
+                career.strip() if career else None,
+                subject.strip() if subject else None,
+                career_year.strip() if career_year else None,
                 description.strip() if description else None,
                 max_score,
                 1 if show_detail_to_student else 0,
