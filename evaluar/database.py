@@ -356,6 +356,30 @@ def submit_answers(
     }
 
 
+def _load_json_list(value: Any) -> list[Any]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        return value
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _load_json_dict(value: Any) -> dict[str, Any]:
+    if value is None or value == "":
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         session = conn.execute(
@@ -386,7 +410,8 @@ def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | No
     parsed_submissions = []
     for row in submissions:
         item = dict(row)
-        item["wrong_questions"] = json.loads(item["wrong_questions"])
+        item["wrong_questions"] = _load_json_list(item.get("wrong_questions"))
+        item["answers"] = _load_json_dict(item.get("answers"))
         parsed_submissions.append(item)
 
     question_stats = []
@@ -394,9 +419,8 @@ def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | No
         order = question["order"]
         correct = incorrect = unanswered = 0
         for submission in parsed_submissions:
-            answers = json.loads(submission["answers"])
-            answer = answers.get(str(order), "").strip()
-            wrong_list = json.loads(submission["wrong_questions"])
+            answer = submission["answers"].get(str(order), "").strip()
+            wrong_list = submission["wrong_questions"]
             if not answer:
                 unanswered += 1
             elif order in wrong_list:
