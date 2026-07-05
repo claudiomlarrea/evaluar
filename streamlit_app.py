@@ -36,6 +36,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
 INSTITUTION_NAME = "Universidad Católica de Cuyo"
+TEACHER_COUNT_BASELINE = 326
 
 st.set_page_config(
     page_title="EvaluAR",
@@ -178,6 +179,10 @@ def ensure_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def _displayed_teacher_count() -> int:
+    return TEACHER_COUNT_BASELINE + count_teachers()
 
 
 def _logo_base64() -> str:
