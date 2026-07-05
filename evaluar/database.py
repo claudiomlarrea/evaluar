@@ -111,6 +111,26 @@ def _migrate_exams(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT")
 
 
+def clear_all_exam_data() -> dict[str, int]:
+    """Elimina exámenes, preguntas, códigos y respuestas. Conserva cuentas docentes."""
+    with get_connection() as conn:
+        counts = {
+            "submissions": conn.execute("SELECT COUNT(*) FROM submissions").fetchone()[0],
+            "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
+            "questions": conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0],
+            "exams": conn.execute("SELECT COUNT(*) FROM exams").fetchone()[0],
+        }
+        conn.executescript(
+            """
+            DELETE FROM submissions;
+            DELETE FROM sessions;
+            DELETE FROM questions;
+            DELETE FROM exams;
+            """
+        )
+    return counts
+
+
 def register_teacher(name: str, pin: str) -> dict[str, Any]:
     teacher_id = generate_id()
     with get_connection() as conn:

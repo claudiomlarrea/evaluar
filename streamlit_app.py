@@ -10,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from evaluar.database import (
+    clear_all_exam_data,
     create_exam,
     create_session,
     get_exam,
@@ -306,19 +307,38 @@ def page_panel() -> None:
     exams = list_exams(st.session_state.teacher["id"])
     if not exams:
         st.info("Todavía no hay exámenes. Creá el primero con la clave de respuestas.")
-        return
+    else:
+        for exam in exams:
+            with st.expander(f"{exam['title']} · {exam['question_count']} preguntas"):
+                st.caption(
+                    f"{exam.get('career') or exam.get('course') or 'Sin carrera'} · "
+                    f"{exam.get('subject') or ''} · "
+                    f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
+                    f"Nota máxima {exam['max_score']} · {exam['session_count']} sesiones"
+                )
+                if st.button("Administrar", key=f"exam_{exam['id']}"):
+                    st.session_state.exam_id = exam["id"]
+                    st.session_state.page = "exam_detail"
+                    st.rerun()
 
-    for exam in exams:
-        with st.expander(f"{exam['title']} · {exam['question_count']} preguntas"):
-            st.caption(
-                f"{exam.get('career') or exam.get('course') or 'Sin carrera'} · "
-                f"{exam.get('subject') or ''} · "
-                f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
-                f"Nota máxima {exam['max_score']} · {exam['session_count']} sesiones"
-            )
-            if st.button("Administrar", key=f"exam_{exam['id']}"):
-                st.session_state.exam_id = exam["id"]
-                st.session_state.page = "exam_detail"
+    with st.expander("Limpiar datos de prueba"):
+        st.warning(
+            "Elimina **todos** los exámenes, códigos del parcial y respuestas de alumnos. "
+            "Las cuentas docentes se conservan."
+        )
+        confirm = st.text_input("Escribí BORRAR para confirmar", key="clear_exam_data_confirm")
+        if st.button("Eliminar todos los exámenes y códigos"):
+            if confirm.strip().upper() != "BORRAR":
+                st.error("Escribí BORRAR para confirmar.")
+            else:
+                deleted = clear_all_exam_data()
+                st.session_state.exam_id = None
+                st.session_state.session_id = None
+                st.session_state.flash_session_code = None
+                st.success(
+                    f"Listo: {deleted['exams']} exámenes, {deleted['sessions']} códigos "
+                    f"y {deleted['submissions']} respuestas eliminados."
+                )
                 st.rerun()
 
 
