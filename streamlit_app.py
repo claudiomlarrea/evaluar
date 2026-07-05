@@ -15,6 +15,7 @@ import streamlit.components.v1 as components
 
 from evaluar.database import (
     clear_all_exam_data,
+    count_teachers,
     create_exam,
     create_session,
     get_exam,
@@ -257,9 +258,17 @@ def render_sidebar() -> None:
         st.session_state.student_result = None
         st.rerun()
 
+    st.sidebar.divider()
+    teacher_total = count_teachers()
+    label = "docente usa" if teacher_total == 1 else "docentes usan"
+    st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
+
 
 def page_home() -> None:
     st.title("Evaluación presencial híbrida")
+    teacher_total = count_teachers()
+    label = "docente registrado" if teacher_total == 1 else "docentes registrados"
+    st.metric("Comunidad docente", teacher_total, help=f"Cantidad de {label} en EvaluAR")
     col1, col2 = st.columns(2)
     with col1:
         st.markdown(

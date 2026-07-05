@@ -131,6 +131,12 @@ def clear_all_exam_data() -> dict[str, int]:
     return counts
 
 
+def count_teachers() -> int:
+    with get_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM teachers").fetchone()
+    return int(row[0])
+
+
 def register_teacher(name: str, pin: str) -> dict[str, Any]:
     teacher_id = generate_id()
     with get_connection() as conn:
