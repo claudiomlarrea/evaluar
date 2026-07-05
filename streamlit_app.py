@@ -110,7 +110,7 @@ def _render_session_share(code: str, key_prefix: str) -> None:
     message_js = json.dumps(
         "Parcial en papel. Después cargá tus respuestas en EvaluAR:\n"
         + (f"{base_url}\n" if base_url else "")
-        + f"Código de sesión: {code}\n"
+        + f"Código del parcial: {code}\n"
         + "En la app elegí «Soy alumno» e ingresá el código."
     )
 
@@ -208,7 +208,7 @@ def render_sidebar() -> None:
     st.sidebar.divider()
     st.sidebar.markdown("**Acceso alumno**")
     st.sidebar.caption("Ingresá el código del parcial o abrí el link del docente.")
-    code = st.sidebar.text_input("Código de sesión", placeholder="Ej. JT7MH2GD", key="sidebar_student_code")
+    code = st.sidebar.text_input("Código del parcial", placeholder="Ej. JT7MH2GD", key="sidebar_student_code")
     if st.sidebar.button("Cargar mis respuestas", use_container_width=True) and code.strip():
         st.session_state.student_code = code.strip().upper()
         st.session_state.page = "student"
@@ -243,13 +243,13 @@ def page_home() -> None:
         "(o abrí el link que te compartió)."
     )
     student_code = st.text_input(
-        "Código de sesión",
+        "Código del parcial",
         placeholder="Ej. JT7MH2GD",
         key="home_student_code",
     )
     if st.button("Ingresar y cargar mis respuestas", type="primary"):
         if not student_code.strip():
-            st.error("Ingresá el código de sesión.")
+            st.error("Ingresá el código del parcial.")
         else:
             st.session_state.student_code = student_code.strip().upper()
             st.session_state.page = "student"
@@ -648,12 +648,14 @@ def page_exam_detail() -> None:
                 if session["code"] == flash:
                     default_index = index
                     break
+        default_index = min(default_index, max(0, len(sessions) - 1))
 
         selected_index = st.selectbox(
             "Código activo de este parcial",
             range(len(sessions)),
             format_func=lambda i: options[i],
             index=default_index,
+            key="active_session_code_select",
         )
         active = sessions[selected_index]
 
@@ -765,14 +767,17 @@ def page_session_results() -> None:
 
 
 def page_student() -> None:
-    code = st.session_state.student_code or st.query_params.get("code", "")
+    raw_code = st.session_state.student_code or st.query_params.get("code", "")
+    if isinstance(raw_code, list):
+        raw_code = raw_code[0] if raw_code else ""
+    code = str(raw_code or "").strip().upper()
     if not code:
-        st.warning("Ingresá un código de sesión desde la barra lateral.")
+        st.warning("Ingresá un código del parcial desde la barra lateral.")
         return
 
     payload = get_session_by_code(code)
     if not payload:
-        st.error("Sesión no encontrada.")
+        st.error("Código no encontrado. Verificá que sea el correcto.")
         return
 
     session = payload["session"]
@@ -879,8 +884,11 @@ def main() -> None:
 
     code_param = st.query_params.get("code")
     if code_param:
-        st.session_state.student_code = code_param.upper()
-        st.session_state.page = "student"
+        if isinstance(code_param, list):
+            code_param = code_param[0] if code_param else ""
+        if code_param:
+            st.session_state.student_code = str(code_param).upper()
+            st.session_state.page = "student"
 
     render_header()
     render_sidebar()
