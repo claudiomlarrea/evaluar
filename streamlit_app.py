@@ -133,9 +133,10 @@ def render_sidebar() -> None:
             st.rerun()
 
     st.sidebar.divider()
-    st.sidebar.markdown("**Link alumno**")
-    code = st.sidebar.text_input("Código de sesión", placeholder="Ej. ABC12345")
-    if st.sidebar.button("Ir a carga de respuestas", use_container_width=True) and code.strip():
+    st.sidebar.markdown("**Acceso alumno**")
+    st.sidebar.caption("Ingresá el código del parcial o abrí el link del docente.")
+    code = st.sidebar.text_input("Código de sesión", placeholder="Ej. JT7MH2GD", key="sidebar_student_code")
+    if st.sidebar.button("Cargar mis respuestas", use_container_width=True) and code.strip():
         st.session_state.student_code = code.strip().upper()
         st.session_state.page = "student"
         st.session_state.student_step = "identify"
@@ -161,6 +162,27 @@ def page_home() -> None:
             "Pensado para carreras con alto volumen: 100 alumnos, 50 preguntas, "
             "opción múltiple, V/F y emparejamiento."
         )
+
+    st.divider()
+    st.subheader("Soy alumno")
+    st.markdown(
+        "Después del parcial en papel, ingresá el **código** que te dio el docente "
+        "(o abrí el link que te compartió)."
+    )
+    student_code = st.text_input(
+        "Código de sesión",
+        placeholder="Ej. JT7MH2GD",
+        key="home_student_code",
+    )
+    if st.button("Ingresar y cargar mis respuestas", type="primary"):
+        if not student_code.strip():
+            st.error("Ingresá el código de sesión.")
+        else:
+            st.session_state.student_code = student_code.strip().upper()
+            st.session_state.page = "student"
+            st.session_state.student_step = "identify"
+            st.session_state.student_result = None
+            st.rerun()
 
 
 def page_auth() -> None:
