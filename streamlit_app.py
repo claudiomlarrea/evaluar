@@ -430,6 +430,8 @@ def render_sidebar() -> None:
     label = "docente usa" if teacher_total == 1 else "docentes usan"
     st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
     st.sidebar.caption(f"Base de datos: {database_label()}")
+    if is_ephemeral_storage():
+        st.sidebar.error("SQLite en la nube: datos efímeros")
 
 
 def page_home() -> None:
@@ -474,6 +476,7 @@ def page_home() -> None:
 
 
 def page_auth() -> None:
+    _render_storage_warning()
     st.subheader("Acceso docente")
     tab_login, tab_register = st.tabs(["Iniciar sesión", "Crear cuenta"])
 
@@ -483,7 +486,10 @@ def page_auth() -> None:
         if st.button("Ingresar", type="primary"):
             teacher = login_teacher(name, pin)
             if not teacher:
-                st.error("Credenciales incorrectas.")
+                st.error(
+                    "Credenciales incorrectas. Si la app se reinició recientemente, "
+                    "volvé a **Crear cuenta** (SQLite en la nube no guarda usuarios)."
+                )
             else:
                 st.session_state.teacher = teacher
                 st.session_state.page = "panel"
