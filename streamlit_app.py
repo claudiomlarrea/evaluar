@@ -20,6 +20,7 @@ from evaluar.database import (
     create_exam,
     create_session,
     duplicate_exam,
+    delete_session,
     get_exam,
     get_session_by_code,
     get_session_results,
@@ -58,7 +59,38 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-init_db()
+def _bootstrap_db() -> None:
+    try:
+        init_db()
+    except Exception as exc:
+        from evaluar.db_backend import using_postgres
+
+        if not using_postgres():
+            raise
+        st.error("No se pudo conectar a PostgreSQL. Revisá la configuración en Streamlit Secrets.")
+        st.markdown(
+            """
+            En [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets**,
+            debe haber **una sola línea** como esta (con la URL que copiaste de Neon):
+
+            ```
+            DATABASE_URL = "postgresql://neondb_owner:TU_CONTRASEÑA@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"
+            ```
+
+            **Checklist:**
+            1. En Neon → **Dashboard** → activá **Pooled connection** → **Copy snippet** (contraseña visible).
+            2. Pegá la URL **completa** entre comillas dobles.
+            3. Sin espacios antes ni después del `=`.
+            4. Si la contraseña tiene símbolos raros (`@`, `#`, `/`), en Neon generá una contraseña nueva (solo letras y números).
+            5. **Save** en Secrets y **Reboot app**.
+            """
+        )
+        with st.expander("Detalle del error (para soporte)"):
+            st.code(str(exc))
+        st.stop()
+
+
+_bootstrap_db()
 
 DEFAULT_MC = ["A", "B", "C", "D", "E", "F"]
 
@@ -341,6 +373,42 @@ def _render_session_access_control(active: dict, teacher_id: str) -> None:
             set_session_active(active["id"], teacher_id, True)
             st.success("Código reabierto.")
             st.rerun()
+
+
+def _render_session_delete(active: dict, teacher_id: str) -> None:
+    st.markdown("#### Eliminar código")
+    st.caption(
+        "Borrá códigos de **prueba** sin eliminar el examen. "
+        "Después podés generar el código definitivo del parcial."
+    )
+    submissions = int(active.get("submission_count") or 0)
+    if submissions:
+        st.warning(
+            f"Este código tiene **{submissions} respuesta(s)** cargadas. "
+            "Al eliminarlo se pierden; descargá la planilla antes si las necesitás."
+        )
+    confirm = st.text_input(
+        f"Escribí **{active['code']}** para confirmar",
+        key=f"delete_session_confirm_{active['id']}",
+    )
+    if st.button(
+        "Eliminar este código (no borra el examen)",
+        use_container_width=True,
+        key=f"delete_session_btn_{active['id']}",
+    ):
+        if confirm.strip().upper() != str(active["code"]).upper():
+            st.error(f"Escribí {active['code']} para confirmar.")
+        else:
+            deleted = delete_session(active["id"], teacher_id)
+            if not deleted:
+                st.error("No se pudo eliminar el código.")
+            else:
+                if st.session_state.get("session_id") == active["id"]:
+                    st.session_state.session_id = None
+                if st.session_state.get("flash_session_code") == active["code"]:
+                    st.session_state.flash_session_code = None
+                st.success(f"Código {active['code']} eliminado.")
+                st.rerun()
 
 
 def ensure_state() -> None:
@@ -1176,7 +1244,7 @@ def page_exam_detail() -> None:
         if len(sessions) > 1:
             st.warning(
                 f"Hay **{len(sessions)} códigos** generados. Usá **uno solo** por parcial. "
-                "Elegí el correcto abajo."
+                "Podés **eliminar** los de prueba más abajo y dejar el definitivo."
             )
 
         options = [
@@ -1220,6 +1288,8 @@ def page_exam_detail() -> None:
 
         st.divider()
         _render_session_access_control(active, st.session_state.teacher["id"])
+        st.divider()
+        _render_session_delete(active, st.session_state.teacher["id"])
 
         if len(sessions) > 1:
             with st.expander("Ver todos los códigos generados"):

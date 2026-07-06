@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,15 +15,34 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
 def _get_database_url() -> str | None:
     url = os.environ.get("DATABASE_URL")
     if url:
-        return url.strip()
+        return _normalize_postgres_url(url)
     try:
         import streamlit as st
 
-        if hasattr(st, "secrets") and "DATABASE_URL" in st.secrets:
-            return str(st.secrets["DATABASE_URL"]).strip()
+        if hasattr(st, "secrets"):
+            if "DATABASE_URL" in st.secrets:
+                return _normalize_postgres_url(str(st.secrets["DATABASE_URL"]))
+            connections = st.secrets.get("connections")
+            if connections and "postgresql" in connections:
+                pg = connections["postgresql"]
+                if isinstance(pg, dict) and pg.get("url"):
+                    return _normalize_postgres_url(str(pg["url"]))
     except Exception:
         pass
     return None
+
+
+def _normalize_postgres_url(url: str) -> str:
+    cleaned = url.strip().strip('"').strip("'")
+    if cleaned.startswith("postgres://"):
+        cleaned = cleaned.replace("postgres://", "postgresql://", 1)
+    # Neon a veces incluye channel_binding y rompe psycopg2 en algunos entornos.
+    cleaned = re.sub(r"([?&])channel_binding=[^&]*&?", r"\1", cleaned)
+    cleaned = cleaned.rstrip("&").rstrip("?")
+    if cleaned.startswith("postgresql://") and "sslmode=" not in cleaned:
+        if any(host in cleaned for host in ("neon.tech", "supabase.co", "railway.app")):
+            cleaned = f"{cleaned}{'&' if '?' in cleaned else '?'}sslmode=require"
+    return cleaned
 
 
 def using_postgres() -> bool:
@@ -120,9 +140,7 @@ def get_connection() -> Iterator[_SQLiteConnection | _PostgresConnection]:
         import psycopg2
 
         url = _get_database_url() or ""
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
-        conn = psycopg2.connect(url)
+        conn = psycopg2.connect(url, connect_timeout=15)
         wrapper = _PostgresConnection(conn)
         try:
             yield wrapper

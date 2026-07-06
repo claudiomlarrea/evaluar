@@ -443,6 +443,26 @@ def set_session_active(session_id: str, teacher_id: str, active: bool) -> bool:
     return True
 
 
+def delete_session(session_id: str, teacher_id: str) -> dict[str, Any] | None:
+    """Elimina un código del parcial y sus respuestas. El examen no se modifica."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT s.id, s.code, s.exam_id,
+                   (SELECT COUNT(*) FROM submissions sub WHERE sub.session_id = s.id) AS submission_count
+            FROM sessions s
+            JOIN exams e ON e.id = s.exam_id
+            WHERE s.id = ? AND e.teacher_id = ?
+            """,
+            (session_id, teacher_id),
+        ).fetchone()
+        if not row:
+            return None
+        session = row_to_dict(row) or {}
+        conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    return session
+
+
 def get_session_by_code(code: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         session = conn.execute(
