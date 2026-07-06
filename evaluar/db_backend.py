@@ -34,6 +34,22 @@ def database_label() -> str:
     return "PostgreSQL" if using_postgres() else "SQLite"
 
 
+def is_ephemeral_storage() -> bool:
+    """SQLite en Streamlit Cloud se borra en cada redeploy."""
+    if using_postgres():
+        return False
+    try:
+        import streamlit as st
+
+        host = ""
+        if hasattr(st, "context") and hasattr(st.context, "headers"):
+            headers = st.context.headers
+            host = (headers.get("Host") or headers.get("host") or "").lower()
+        return "streamlit.app" in host
+    except Exception:
+        return False
+
+
 def _adapt_sql(sql: str) -> str:
     if using_postgres():
         return sql.replace("?", "%s")

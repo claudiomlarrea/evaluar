@@ -31,7 +31,7 @@ from evaluar.database import (
     submit_answers,
     update_exam,
 )
-from evaluar.db_backend import database_label
+from evaluar.db_backend import database_label, is_ephemeral_storage
 from evaluar.answer_parser import letters_for_count
 from evaluar.question_builder import TYPE_CHOICES, TYPE_LABELS, build_all_questions, default_question_draft
 from evaluar.utils import format_datetime, format_exam_schedule, format_score, is_session_open, question_type_label
@@ -381,6 +381,17 @@ def render_header() -> None:
         </div>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def _render_storage_warning() -> None:
+    if not is_ephemeral_storage():
+        return
+    st.warning(
+        "**Los datos no se guardan entre reinicios.** Esta app usa SQLite en Streamlit Cloud: "
+        "cada redeploy borra cuentas docentes, exámenes y códigos. "
+        "Para producción, el administrador debe configurar **PostgreSQL** en "
+        "*Settings → Secrets* con la clave `DATABASE_URL`."
     )
 
 

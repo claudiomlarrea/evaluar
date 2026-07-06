@@ -29,22 +29,27 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-## Persistencia (PostgreSQL)
+## Persistencia (PostgreSQL) — obligatorio en producción
 
-Sin configuración extra, EvaluAR usa **SQLite** (ideal en local). En Streamlit Cloud los datos pueden perderse al reiniciar.
+**Problema:** En Streamlit Cloud, SQLite se **borra en cada redeploy**. Los docentes pierden su cuenta y los exámenes desaparecen.
 
-Para producción, configurá **PostgreSQL** (Neon, Supabase, Railway, etc.):
+**Solución:** Base PostgreSQL gratuita (5 minutos):
 
-1. Creá una base PostgreSQL y copiá la URL de conexión.
-2. En Streamlit Cloud → **Settings → Secrets**, agregá:
+### Opción recomendada: [Neon](https://neon.tech)
+
+1. Creá cuenta en [neon.tech](https://neon.tech) → **New project** → nombre `evaluar`.
+2. En el panel, copiá la **connection string** (formato `postgresql://usuario:pass@host/evaluar?sslmode=require`).
+3. En [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets**:
 
 ```toml
-DATABASE_URL = "postgresql://usuario:contraseña@host:5432/evaluar"
+DATABASE_URL = "postgresql://usuario:contraseña@ep-xxxx.us-east-2.aws.neon.tech/evaluar?sslmode=require"
 ```
 
-3. Reiniciá la app. En la barra lateral verás `Base de datos: PostgreSQL`.
+4. **Save** → **Reboot app**.
+5. En la barra lateral debe decir `Base de datos: PostgreSQL`.
+6. Volvé a **Crear cuenta** docente (una sola vez). Desde ahí, todo persiste.
 
-Plantilla local: `.streamlit/secrets.toml.example`
+Alternativas: Supabase, Railway, ElephantSQL.
 
 ## Flujo
 
