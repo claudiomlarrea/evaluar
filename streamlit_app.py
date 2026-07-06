@@ -158,13 +158,19 @@ def _render_local_backup_notice() -> None:
     )
 
 
-def _render_exam_backup_download(exam: dict, *, label: str = "Descargar examen (.json)") -> None:
+def _render_exam_backup_download(
+    exam: dict,
+    *,
+    label: str = "Descargar examen (.json)",
+    key: str | None = None,
+) -> None:
     st.download_button(
         label,
         data=exam_backup_bytes(exam),
         file_name=exam_backup_filename(exam),
         mime="application/json",
         use_container_width=True,
+        key=key or f"backup_exam_{exam['id']}",
     )
 
 
