@@ -444,7 +444,7 @@ def set_session_active(session_id: str, teacher_id: str, active: bool) -> bool:
 
 
 def delete_session(session_id: str, teacher_id: str) -> dict[str, Any] | None:
-    """Elimina un código del parcial y sus respuestas. El examen no se modifica."""
+    """Elimina un código del examen y sus respuestas. El examen no se modifica."""
     with get_connection() as conn:
         row = conn.execute(
             """
@@ -516,7 +516,7 @@ def submit_answers(
             (session["id"], dni),
         ).fetchone()
         if existing:
-            raise ValueError("Ya enviaste tus respuestas para este parcial.")
+            raise ValueError("Ya enviaste tus respuestas para este examen.")
 
     result = grade_submission(questions, answers, float(exam["max_score"]))
     submission_id = generate_id()

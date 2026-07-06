@@ -54,7 +54,7 @@ Alternativas: Supabase, Railway, ElephantSQL.
 ## Flujo
 
 1. **Docente** → Crear cuenta → Nuevo examen → clave de respuestas pregunta por pregunta.
-2. **Generar código del parcial** → compartir link, QR o WhatsApp.
+2. **Generar código del examen** → compartir link, QR o WhatsApp.
 3. **Alumnos** → Rinden en papel → cargan respuestas con el código.
 4. **Docente** → Cierra la carga cuando termina la comisión → planilla y Excel.
 

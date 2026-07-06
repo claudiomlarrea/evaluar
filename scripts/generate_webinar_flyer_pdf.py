@@ -148,7 +148,7 @@ def build_pdf(output: Path = OUTPUT) -> Path:
 
     y = h - header_h - date_h - 7 * mm
     c.setFillColor(TEXT)
-    question = "¿Cómo evaluar parciales presenciales con cientos de alumnos en minutos?"
+    question = "¿Cómo evaluar exámenes presenciales con cientos de alumnos en minutos?"
     y = _draw_lines(
         c,
         margin,

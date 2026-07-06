@@ -208,15 +208,15 @@ def _render_session_share(code: str, key_prefix: str) -> None:
     if base_url:
         st.caption(f"URL EvaluAR: `{base_url}` · Código: **`{code}`**")
     else:
-        st.caption(f"Código del parcial: **`{code}`** (copiá también la URL desde el navegador)")
+        st.caption(f"Código del examen: **`{code}`** (copiá también la URL desde el navegador)")
 
     code_js = json.dumps(code)
     share_js = json.dumps(share_url)
     base_js = json.dumps(base_url)
     message_js = json.dumps(
-        "Parcial en papel. Después cargá tus respuestas en EvaluAR:\n"
+        "Examen en papel. Después cargá tus respuestas en EvaluAR:\n"
         + (f"{share_url or base_url}\n" if (share_url or base_url) else "")
-        + f"Código del parcial: {code}\n"
+        + f"Código del examen: {code}\n"
         + "En la app elegí «Soy alumno» e ingresá el código."
     )
 
@@ -353,7 +353,7 @@ def _render_session_share(code: str, key_prefix: str) -> None:
 
 def _render_session_access_control(active: dict, teacher_id: str) -> None:
     session_open = is_session_open(active)
-    st.markdown("#### Cerrar código del parcial")
+    st.markdown("#### Cerrar código del examen")
     if session_open:
         st.warning(
             "El código **está abierto**: los alumnos pueden seguir cargando respuestas. "
@@ -386,7 +386,7 @@ def _render_session_delete(active: dict, teacher_id: str) -> None:
     st.markdown("#### Eliminar código")
     st.caption(
         "Borrá códigos de **prueba** sin eliminar el examen. "
-        "Después podés generar el código definitivo del parcial."
+        "Después podés generar el código definitivo del examen."
     )
     submissions = int(active.get("submission_count") or 0)
     if submissions:
@@ -521,8 +521,8 @@ def render_sidebar() -> None:
 
     st.sidebar.divider()
     st.sidebar.markdown("**Acceso alumno**")
-    st.sidebar.caption("Ingresá el código del parcial o abrí el link del docente.")
-    code = st.sidebar.text_input("Código del parcial", placeholder="Ej. JT7MH2GD", key="sidebar_student_code")
+    st.sidebar.caption("Ingresá el código del examen o abrí el link del docente.")
+    code = st.sidebar.text_input("Código del examen", placeholder="Ej. JT7MH2GD", key="sidebar_student_code")
     if st.sidebar.button("Cargar mis respuestas", use_container_width=True) and code.strip():
         st.session_state.student_code = code.strip().upper()
         st.session_state.page = "student"
@@ -558,17 +558,17 @@ def page_home() -> None:
     st.divider()
     st.subheader("Soy alumno")
     st.markdown(
-        "Después del parcial en papel, ingresá el **código** que te dio el docente "
+        "Después del examen en papel, ingresá el **código** que te dio el docente "
         "(o abrí el link que te compartió)."
     )
     student_code = st.text_input(
-        "Código del parcial",
+        "Código del examen",
         placeholder="Ej. JT7MH2GD",
         key="home_student_code",
     )
     if st.button("Ingresar y cargar mis respuestas", type="primary"):
         if not student_code.strip():
-            st.error("Ingresá el código del parcial.")
+            st.error("Ingresá el código del examen.")
         else:
             st.session_state.student_code = student_code.strip().upper()
             st.session_state.page = "student"
@@ -692,7 +692,7 @@ def page_panel() -> None:
 
     with st.expander("Limpiar datos de prueba"):
         st.warning(
-            "Elimina **todos** los exámenes, códigos del parcial y respuestas de alumnos. "
+            "Elimina **todos** los exámenes, códigos del examen y respuestas de alumnos. "
             "Las cuentas docentes se conservan."
         )
         confirm = st.text_input("Escribí BORRAR para confirmar", key="clear_exam_data_confirm")
@@ -916,9 +916,9 @@ def page_new_exam() -> None:
 
         title = st.text_input(
             "Nombre del examen *",
-            placeholder="Parcial 2",
+            placeholder="Examen 2",
             value=preset.get("title", ""),
-            help="Ej. Parcial 1, Final, Recuperatorio",
+            help="Ej. Examen 1, Final, Recuperatorio",
         )
 
         preset_date = date.today()
@@ -938,14 +938,14 @@ def page_new_exam() -> None:
         col_date, col_time = st.columns(2)
         with col_date:
             exam_date = st.date_input(
-                "Fecha del parcial *",
+                "Fecha del examen *",
                 value=preset_date,
                 format="DD/MM/YYYY",
                 help="Elegí día, mes y año desde el calendario.",
             )
         with col_time:
             exam_time = st.time_input(
-                "Hora del parcial",
+                "Hora del examen",
                 value=preset_time,
                 step=timedelta(minutes=5),
                 help="Podés ajustar la hora manualmente.",
@@ -1210,24 +1210,24 @@ def page_exam_detail() -> None:
     )
     _render_exam_backup_download(exam, label="Descargar examen y clave (.json)")
 
-    with st.expander("¿Cómo funciona el día del parcial?", expanded=False):
+    with st.expander("¿Cómo funciona el día del examen?", expanded=False):
         st.markdown(
             """
-            **Antes del parcial:** ya cargaste el examen y la clave de respuestas (al crear el examen).
+            **Antes del examen:** ya cargaste el examen y la clave de respuestas (al crear el examen).
 
-            **El día del parcial:**
-            1. Generá el **código del parcial** (botón de abajo) — **una sola vez** por comisión.
+            **El día del examen:**
+            1. Generá el **código del examen** (botón de abajo) — **una sola vez** por comisión.
             2. Enviá a los alumnos la **URL de EvaluAR** + el **código** (WhatsApp).
             3. Rinden en **papel** en el aula; recogen los cuadernillos.
             4. Los alumnos entran a EvaluAR → **Soy alumno** → cargan sus respuestas con el código.
             5. Vos ves acá la **planilla de notas**, descargás Excel o CSV y **guardás el archivo en tu computadora**.
             6. Cuando la comisión terminó de cargar, **cerrá el código** (debajo del QR).
 
-            El código **no es** para rendir online: es para **cargar respuestas después** del parcial en papel.
+            El código **no es** para rendir online: es para **cargar respuestas después** del examen en papel.
             """
         )
 
-    st.markdown("### Código del parcial para alumnos")
+    st.markdown("### Código del examen para alumnos")
     st.info(
         "**Generar código** crea el identificador (ej. HG3QK5DR) que los alumnos usarán "
         "**después** de rendir en papel para marcar sus respuestas en el celular."
@@ -1256,7 +1256,7 @@ def page_exam_detail() -> None:
     else:
         if len(sessions) > 1:
             st.warning(
-                f"Hay **{len(sessions)} códigos** generados. Usá **uno solo** por parcial. "
+                f"Hay **{len(sessions)} códigos** generados. Usá **uno solo** por examen. "
                 "Podés **eliminar** los de prueba más abajo y dejar el definitivo."
             )
 
@@ -1276,7 +1276,7 @@ def page_exam_detail() -> None:
         default_index = min(default_index, max(0, len(sessions) - 1))
 
         selected_index = st.selectbox(
-            "Código activo de este parcial",
+            "Código activo de este examen",
             range(len(sessions)),
             format_func=lambda i: options[i],
             index=default_index,
@@ -1397,7 +1397,7 @@ def page_session_results() -> None:
             )
     else:
         st.info(
-            "Todavía no hay respuestas. Compartí el link con los alumnos después del parcial "
+            "Todavía no hay respuestas. Compartí el link con los alumnos después del examen "
             f"en papel: `?code={session['code']}`"
         )
 
@@ -1411,7 +1411,7 @@ def page_student() -> None:
         raw_code = raw_code[0] if raw_code else ""
     code = str(raw_code or "").strip().upper()
     if not code:
-        st.warning("Ingresá un código del parcial desde la barra lateral.")
+        st.warning("Ingresá un código del examen desde la barra lateral.")
         return
 
     payload = get_session_by_code(code)
