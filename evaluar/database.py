@@ -1,112 +1,103 @@
-"""Capa de acceso a SQLite."""
+"""Capa de acceso a datos (SQLite local o PostgreSQL en producción)."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
-from contextlib import contextmanager
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
+from evaluar.db_backend import first_value, get_connection, row_to_dict, using_postgres
 from evaluar.grading import grade_submission
-from evaluar.utils import generate_id, generate_session_code, is_session_open
-
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
+from evaluar.utils import generate_id, generate_session_code, is_session_open, utc_now
 
 
 def hash_pin(pin: str) -> str:
     return hashlib.sha256(pin.encode()).hexdigest()
 
 
-def utc_now() -> str:
-    return datetime.utcnow().isoformat()
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS teachers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    pin_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 
+CREATE TABLE IF NOT EXISTS exams (
+    id TEXT PRIMARY KEY,
+    teacher_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    course TEXT,
+    career TEXT,
+    subject TEXT,
+    career_year TEXT,
+    description TEXT,
+    exam_date TEXT,
+    exam_time TEXT,
+    max_score REAL NOT NULL DEFAULT 10,
+    show_detail_to_student INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE
+);
 
-@contextmanager
-def get_connection() -> Iterator[sqlite3.Connection]:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+CREATE TABLE IF NOT EXISTS questions (
+    id TEXT PRIMARY KEY,
+    exam_id TEXT NOT NULL,
+    "order" INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    prompt TEXT,
+    options TEXT NOT NULL DEFAULT '[]',
+    correct_answer TEXT NOT NULL,
+    points REAL NOT NULL DEFAULT 1,
+    UNIQUE(exam_id, "order"),
+    FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    exam_id TEXT NOT NULL,
+    code TEXT NOT NULL UNIQUE,
+    label TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    opens_at TEXT,
+    closes_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS submissions (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    student_name TEXT NOT NULL,
+    student_dni TEXT NOT NULL,
+    answers TEXT NOT NULL,
+    score REAL NOT NULL,
+    correct_count INTEGER NOT NULL,
+    wrong_count INTEGER NOT NULL,
+    unanswered_count INTEGER NOT NULL,
+    wrong_questions TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    UNIQUE(session_id, student_dni),
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+"""
 
 
 def init_db() -> None:
     with get_connection() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS teachers (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                pin_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS exams (
-                id TEXT PRIMARY KEY,
-                teacher_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                course TEXT,
-                description TEXT,
-                max_score REAL NOT NULL DEFAULT 10,
-                show_detail_to_student INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS questions (
-                id TEXT PRIMARY KEY,
-                exam_id TEXT NOT NULL,
-                "order" INTEGER NOT NULL,
-                type TEXT NOT NULL,
-                prompt TEXT,
-                options TEXT NOT NULL DEFAULT '[]',
-                correct_answer TEXT NOT NULL,
-                points REAL NOT NULL DEFAULT 1,
-                UNIQUE(exam_id, "order"),
-                FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                exam_id TEXT NOT NULL,
-                code TEXT NOT NULL UNIQUE,
-                label TEXT,
-                is_active INTEGER NOT NULL DEFAULT 1,
-                opens_at TEXT,
-                closes_at TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS submissions (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                student_name TEXT NOT NULL,
-                student_dni TEXT NOT NULL,
-                answers TEXT NOT NULL,
-                score REAL NOT NULL,
-                correct_count INTEGER NOT NULL,
-                wrong_count INTEGER NOT NULL,
-                unanswered_count INTEGER NOT NULL,
-                wrong_questions TEXT NOT NULL,
-                submitted_at TEXT NOT NULL,
-                UNIQUE(session_id, student_dni),
-                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-            );
-            """
-        )
+        conn.executescript(SCHEMA_SQL)
         _migrate_exams(conn)
 
 
-def _migrate_exams(conn: sqlite3.Connection) -> None:
+def _migrate_exams(conn: Any) -> None:
+    columns = ("career", "subject", "career_year", "exam_date", "exam_time")
+    if using_postgres():
+        for column in columns:
+            conn.execute(f"ALTER TABLE exams ADD COLUMN IF NOT EXISTS {column} TEXT")
+        return
+
     existing = {row[1] for row in conn.execute("PRAGMA table_info(exams)")}
-    for column in ("career", "subject", "career_year", "exam_date", "exam_time"):
+    for column in columns:
         if column not in existing:
             conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT")
 
@@ -115,10 +106,10 @@ def clear_all_exam_data() -> dict[str, int]:
     """Elimina exámenes, preguntas, códigos y respuestas. Conserva cuentas docentes."""
     with get_connection() as conn:
         counts = {
-            "submissions": conn.execute("SELECT COUNT(*) FROM submissions").fetchone()[0],
-            "sessions": conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0],
-            "questions": conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0],
-            "exams": conn.execute("SELECT COUNT(*) FROM exams").fetchone()[0],
+            "submissions": int(first_value(conn.execute("SELECT COUNT(*) FROM submissions").fetchone())),
+            "sessions": int(first_value(conn.execute("SELECT COUNT(*) FROM sessions").fetchone())),
+            "questions": int(first_value(conn.execute("SELECT COUNT(*) FROM questions").fetchone())),
+            "exams": int(first_value(conn.execute("SELECT COUNT(*) FROM exams").fetchone())),
         }
         conn.executescript(
             """
@@ -134,7 +125,7 @@ def clear_all_exam_data() -> dict[str, int]:
 def count_teachers() -> int:
     with get_connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM teachers").fetchone()
-    return int(row[0])
+    return int(first_value(row))
 
 
 def register_teacher(name: str, pin: str) -> dict[str, Any]:
@@ -155,7 +146,7 @@ def login_teacher(name: str, pin: str) -> dict[str, Any] | None:
         ).fetchone()
     if not row:
         return None
-    teacher = dict(row)
+    teacher = row_to_dict(row) or {}
     if teacher["pin_hash"] != hash_pin(pin):
         return None
     return {"id": teacher["id"], "name": teacher["name"]}
@@ -174,7 +165,50 @@ def list_exams(teacher_id: str) -> list[dict[str, Any]]:
             """,
             (teacher_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [row_to_dict(row) or {} for row in rows]
+
+
+def _insert_questions(conn: Any, exam_id: str, questions: list[dict[str, Any]]) -> None:
+    for question in questions:
+        correct = question["correct_answer"]
+        if isinstance(correct, dict):
+            correct = json.dumps(correct)
+        conn.execute(
+            """
+            INSERT INTO questions (id, exam_id, "order", type, prompt, options,
+                                   correct_answer, points)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                generate_id(),
+                exam_id,
+                question["order"],
+                question["type"],
+                question.get("prompt"),
+                json.dumps(question.get("options", [])),
+                correct,
+                question.get("points", 1),
+            ),
+        )
+
+
+def _course_label(
+    career: str | None,
+    subject: str | None,
+    career_year: str | None,
+) -> str | None:
+    return (
+        " · ".join(
+            piece
+            for piece in [
+                career.strip() if career else None,
+                subject.strip() if subject else None,
+                f"Año {career_year.strip()}" if career_year and career_year.strip() else None,
+            ]
+            if piece
+        )
+        or None
+    )
 
 
 def create_exam(
@@ -190,16 +224,6 @@ def create_exam(
     show_detail_to_student: bool,
     questions: list[dict[str, Any]],
 ) -> str:
-    course = " · ".join(
-        piece
-        for piece in [
-            career.strip() if career else None,
-            subject.strip() if subject else None,
-            f"Año {career_year.strip()}" if career_year and career_year.strip() else None,
-        ]
-        if piece
-    ) or None
-
     exam_id = generate_id()
     with get_connection() as conn:
         conn.execute(
@@ -214,7 +238,7 @@ def create_exam(
                 exam_id,
                 teacher_id,
                 title.strip(),
-                course,
+                _course_label(career, subject, career_year),
                 career.strip() if career else None,
                 subject.strip() if subject else None,
                 career_year.strip() if career_year else None,
@@ -226,28 +250,96 @@ def create_exam(
                 utc_now(),
             ),
         )
-        for question in questions:
-            correct = question["correct_answer"]
-            if isinstance(correct, dict):
-                correct = json.dumps(correct)
-            conn.execute(
-                """
-                INSERT INTO questions (id, exam_id, "order", type, prompt, options,
-                                       correct_answer, points)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    generate_id(),
-                    exam_id,
-                    question["order"],
-                    question["type"],
-                    question.get("prompt"),
-                    json.dumps(question.get("options", [])),
-                    correct,
-                    question.get("points", 1),
-                ),
-            )
+        _insert_questions(conn, exam_id, questions)
     return exam_id
+
+
+def update_exam(
+    exam_id: str,
+    teacher_id: str,
+    title: str,
+    career: str | None,
+    subject: str | None,
+    career_year: str | None,
+    description: str | None,
+    exam_date: str | None,
+    exam_time: str | None,
+    max_score: float,
+    show_detail_to_student: bool,
+    questions: list[dict[str, Any]],
+) -> None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM exams WHERE id = ? AND teacher_id = ?",
+            (exam_id, teacher_id),
+        ).fetchone()
+        if not row:
+            raise ValueError("Examen no encontrado.")
+
+        conn.execute(
+            """
+            UPDATE exams
+            SET title = ?, course = ?, career = ?, subject = ?, career_year = ?,
+                description = ?, exam_date = ?, exam_time = ?, max_score = ?,
+                show_detail_to_student = ?
+            WHERE id = ? AND teacher_id = ?
+            """,
+            (
+                title.strip(),
+                _course_label(career, subject, career_year),
+                career.strip() if career else None,
+                subject.strip() if subject else None,
+                career_year.strip() if career_year else None,
+                description.strip() if description else None,
+                exam_date,
+                exam_time,
+                max_score,
+                1 if show_detail_to_student else 0,
+                exam_id,
+                teacher_id,
+            ),
+        )
+        conn.execute('DELETE FROM questions WHERE exam_id = ?', (exam_id,))
+        _insert_questions(conn, exam_id, questions)
+
+
+def duplicate_exam(exam_id: str, teacher_id: str) -> str:
+    exam = get_exam(exam_id, teacher_id)
+    if not exam:
+        raise ValueError("Examen no encontrado.")
+
+    questions: list[dict[str, Any]] = []
+    for question in exam["questions"]:
+        options = question.get("options")
+        if isinstance(options, str):
+            options = json.loads(options)
+        correct = question.get("correct_answer")
+        if question["type"] == "MATCHING" and isinstance(correct, str):
+            correct = json.loads(correct)
+        questions.append(
+            {
+                "order": question["order"],
+                "type": question["type"],
+                "prompt": question.get("prompt"),
+                "options": options,
+                "correct_answer": correct,
+                "points": question.get("points", 1),
+            }
+        )
+
+    return create_exam(
+        teacher_id,
+        f"{exam['title']} (copia)",
+        exam.get("career"),
+        exam.get("subject"),
+        exam.get("career_year"),
+        exam.get("description"),
+        exam.get("exam_date"),
+        exam.get("exam_time"),
+        float(exam["max_score"]),
+        bool(exam["show_detail_to_student"]),
+        questions,
+    )
 
 
 def get_exam(exam_id: str, teacher_id: str | None = None) -> dict[str, Any] | None:
@@ -276,9 +368,9 @@ def get_exam(exam_id: str, teacher_id: str | None = None) -> dict[str, Any] | No
             (exam_id,),
         ).fetchall()
 
-    result = dict(exam)
-    result["questions"] = [dict(q) for q in questions]
-    result["sessions"] = [dict(s) for s in sessions]
+    result = row_to_dict(exam) or {}
+    result["questions"] = [row_to_dict(q) or {} for q in questions]
+    result["sessions"] = [row_to_dict(s) or {} for s in sessions]
     return result
 
 
@@ -298,6 +390,29 @@ def create_session(exam_id: str, label: str | None = None) -> dict[str, Any]:
     return {"id": session_id, "code": code, "label": label}
 
 
+def set_session_active(session_id: str, teacher_id: str, active: bool) -> bool:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT s.id FROM sessions s
+            JOIN exams e ON e.id = s.exam_id
+            WHERE s.id = ? AND e.teacher_id = ?
+            """,
+            (session_id, teacher_id),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            """
+            UPDATE sessions
+            SET is_active = ?, closes_at = ?
+            WHERE id = ?
+            """,
+            (1 if active else 0, None if active else utc_now(), session_id),
+        )
+    return True
+
+
 def get_session_by_code(code: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         session = conn.execute(
@@ -306,19 +421,20 @@ def get_session_by_code(code: str) -> dict[str, Any] | None:
         ).fetchone()
         if not session:
             return None
+        session_dict = row_to_dict(session) or {}
         exam = conn.execute(
             "SELECT * FROM exams WHERE id = ?",
-            (session["exam_id"],),
+            (session_dict["exam_id"],),
         ).fetchone()
         questions = conn.execute(
             'SELECT * FROM questions WHERE exam_id = ? ORDER BY "order" ASC',
-            (session["exam_id"],),
+            (session_dict["exam_id"],),
         ).fetchall()
 
     return {
-        "session": dict(session),
-        "exam": dict(exam),
-        "questions": [dict(q) for q in questions],
+        "session": session_dict,
+        "exam": row_to_dict(exam) or {},
+        "questions": [row_to_dict(q) or {} for q in questions],
     }
 
 
@@ -423,10 +539,11 @@ def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | No
         if not session:
             return None
 
-        exam = conn.execute("SELECT * FROM exams WHERE id = ?", (session["exam_id"],)).fetchone()
+        session_dict = row_to_dict(session) or {}
+        exam = conn.execute("SELECT * FROM exams WHERE id = ?", (session_dict["exam_id"],)).fetchone()
         questions = conn.execute(
             'SELECT * FROM questions WHERE exam_id = ? ORDER BY "order" ASC',
-            (session["exam_id"],),
+            (session_dict["exam_id"],),
         ).fetchall()
         submissions = conn.execute(
             """
@@ -439,14 +556,15 @@ def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | No
 
     parsed_submissions = []
     for row in submissions:
-        item = dict(row)
+        item = row_to_dict(row) or {}
         item["wrong_questions"] = _load_json_list(item.get("wrong_questions"))
         item["answers"] = _load_json_dict(item.get("answers"))
         parsed_submissions.append(item)
 
     question_stats = []
     for question in questions:
-        order = question["order"]
+        q = row_to_dict(question) or {}
+        order = q["order"]
         correct = incorrect = unanswered = 0
         for submission in parsed_submissions:
             answer = submission["answers"].get(str(order), "").strip()
@@ -461,7 +579,7 @@ def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | No
         question_stats.append(
             {
                 "order": order,
-                "type": question["type"],
+                "type": q["type"],
                 "correct": correct,
                 "incorrect": incorrect,
                 "unanswered": unanswered,
@@ -470,9 +588,9 @@ def get_session_results(session_id: str, teacher_id: str) -> dict[str, Any] | No
         )
 
     return {
-        "session": dict(session),
-        "exam": dict(exam),
-        "questions": [dict(q) for q in questions],
+        "session": session_dict,
+        "exam": row_to_dict(exam) or {},
+        "questions": [row_to_dict(q) or {} for q in questions],
         "submissions": parsed_submissions,
         "question_stats": question_stats,
     }

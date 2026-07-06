@@ -6,10 +6,11 @@ import io
 import json
 import base64
 import html
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import pandas as pd
+import qrcode
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -18,6 +19,7 @@ from evaluar.database import (
     count_teachers,
     create_exam,
     create_session,
+    duplicate_exam,
     get_exam,
     get_session_by_code,
     get_session_results,
@@ -25,10 +27,13 @@ from evaluar.database import (
     list_exams,
     login_teacher,
     register_teacher,
+    set_session_active,
     submit_answers,
+    update_exam,
 )
+from evaluar.db_backend import database_label
 from evaluar.answer_parser import letters_for_count
-from evaluar.question_builder import TYPE_CHOICES, build_all_questions, default_question_draft
+from evaluar.question_builder import TYPE_CHOICES, TYPE_LABELS, build_all_questions, default_question_draft
 from evaluar.utils import format_datetime, format_exam_schedule, format_score, is_session_open, question_type_label
 
 QUESTIONS_PER_PAGE = 5
@@ -105,10 +110,25 @@ def _app_base_url() -> str:
     return ""
 
 
+def _student_share_url(code: str) -> str:
+    base_url = _app_base_url()
+    if not base_url:
+        return ""
+    return f"{base_url}?code={code.upper()}"
+
+
+def _qr_png_bytes(url: str) -> bytes:
+    image = qrcode.make(url)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def _render_session_share(code: str, key_prefix: str) -> None:
-    """Botones compactos para copiar URL, código o mensaje."""
+    """Botones compactos para copiar URL, código o mensaje, con QR."""
     code = code.upper()
     base_url = _app_base_url()
+    share_url = _student_share_url(code)
     html_id = "".join(ch if ch.isalnum() else "_" for ch in key_prefix)
 
     if base_url:
@@ -116,47 +136,58 @@ def _render_session_share(code: str, key_prefix: str) -> None:
     else:
         st.caption(f"Código del parcial: **`{code}`** (copiá también la URL desde el navegador)")
 
+    if share_url:
+        col_qr, col_actions = st.columns([1, 2])
+        with col_qr:
+            st.image(_qr_png_bytes(share_url), width=130)
+            st.caption("QR para proyectar en el aula")
+        share_col = col_actions
+    else:
+        share_col = st.container()
+
     code_js = json.dumps(code)
+    share_js = json.dumps(share_url)
     base_js = json.dumps(base_url)
     message_js = json.dumps(
         "Parcial en papel. Después cargá tus respuestas en EvaluAR:\n"
-        + (f"{base_url}\n" if base_url else "")
+        + (f"{share_url or base_url}\n" if (share_url or base_url) else "")
         + f"Código del parcial: {code}\n"
         + "En la app elegí «Soy alumno» e ingresá el código."
     )
 
-    components.html(
-        f"""
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-          <button type="button" id="copy-code-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
-            border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
-            Copiar código
-          </button>
-          <button type="button" id="copy-url-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
-            border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
-            Copiar URL
-          </button>
-          <button type="button" id="copy-msg-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
-            border:1px solid #0d9488;border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.85rem;">
-            Copiar mensaje WhatsApp
-          </button>
-        </div>
-        <script>
-        document.getElementById("copy-code-{html_id}").onclick = function() {{
-            navigator.clipboard.writeText({code_js});
-        }};
-        document.getElementById("copy-url-{html_id}").onclick = function() {{
-            const url = {base_js};
-            if (url) navigator.clipboard.writeText(url);
-            else alert("Copiá la URL desde la barra del navegador.");
-        }};
-        document.getElementById("copy-msg-{html_id}").onclick = function() {{
-            navigator.clipboard.writeText({message_js});
-        }};
-        </script>
-        """,
-        height=44,
-    )
+    with share_col:
+        components.html(
+            f"""
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+              <button type="button" id="copy-code-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
+                border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
+                Copiar código
+              </button>
+              <button type="button" id="copy-url-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
+                border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
+                Copiar link directo
+              </button>
+              <button type="button" id="copy-msg-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
+                border:1px solid #0d9488;border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.85rem;">
+                Copiar mensaje WhatsApp
+              </button>
+            </div>
+            <script>
+            document.getElementById("copy-code-{html_id}").onclick = function() {{
+                navigator.clipboard.writeText({code_js});
+            }};
+            document.getElementById("copy-url-{html_id}").onclick = function() {{
+                const url = {share_js} || {base_js};
+                if (url) navigator.clipboard.writeText(url);
+                else alert("Copiá la URL desde la barra del navegador.");
+            }};
+            document.getElementById("copy-msg-{html_id}").onclick = function() {{
+                navigator.clipboard.writeText({message_js});
+            }};
+            </script>
+            """,
+            height=44,
+        )
 
 
 def ensure_state() -> None:
@@ -175,6 +206,8 @@ def ensure_state() -> None:
         "exam_wizard_page": 1,
         "last_created_session_code": None,
         "flash_session_code": None,
+        "exam_wizard_mode": "create",
+        "edit_exam_id": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -267,6 +300,7 @@ def render_sidebar() -> None:
     teacher_total = _displayed_teacher_count()
     label = "docente usa" if teacher_total == 1 else "docentes usan"
     st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
+    st.sidebar.caption(f"Base de datos: {database_label()}")
 
 
 def page_home() -> None:
@@ -369,10 +403,27 @@ def page_panel() -> None:
                     f"{schedule + ' · ' if schedule else ''}"
                     f"Nota máxima {exam['max_score']} · {exam['session_count']} códigos"
                 )
-                if st.button("Administrar", key=f"exam_{exam['id']}"):
-                    st.session_state.exam_id = exam["id"]
-                    st.session_state.page = "exam_detail"
-                    st.rerun()
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    if st.button("Administrar", key=f"exam_{exam['id']}", use_container_width=True):
+                        st.session_state.exam_id = exam["id"]
+                        st.session_state.page = "exam_detail"
+                        st.rerun()
+                with col_b:
+                    if st.button("Editar", key=f"edit_{exam['id']}", use_container_width=True):
+                        _begin_edit_exam(exam["id"], st.session_state.teacher["id"])
+                        st.session_state.page = "new_exam"
+                        st.rerun()
+                with col_c:
+                    if st.button("Duplicar", key=f"dup_{exam['id']}", use_container_width=True):
+                        try:
+                            new_id = duplicate_exam(exam["id"], st.session_state.teacher["id"])
+                            st.session_state.exam_id = new_id
+                            st.session_state.page = "exam_detail"
+                            st.success("Examen duplicado.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"No se pudo duplicar: {exc}")
 
     with st.expander("Limpiar datos de prueba"):
         st.warning(
@@ -482,6 +533,65 @@ def _collect_question_draft(question_number: int) -> dict:
     return draft
 
 
+def _init_question_widgets_from_exam(questions: list[dict]) -> None:
+    for question in questions:
+        number = int(question["order"])
+        qtype = question["type"]
+        st.session_state[f"q{number}_type_label"] = TYPE_LABELS.get(qtype, "Opción múltiple")
+
+        options_raw = question.get("options")
+        if isinstance(options_raw, str):
+            options_raw = json.loads(options_raw)
+
+        if qtype == "MULTIPLE_CHOICE":
+            options = options_raw if isinstance(options_raw, list) else []
+            st.session_state[f"q{number}_option_count"] = len(options) or 5
+            st.session_state[f"q{number}_mc_answer"] = question["correct_answer"]
+        elif qtype == "TRUE_FALSE":
+            st.session_state[f"q{number}_vf_answer"] = question["correct_answer"]
+        elif qtype == "MATCHING":
+            targets = options_raw.get("targets", []) if isinstance(options_raw, dict) else []
+            items = options_raw.get("items", []) if isinstance(options_raw, dict) else []
+            st.session_state[f"q{number}_target_count"] = len(targets) or 6
+            st.session_state[f"q{number}_item_count"] = len(items) or 3
+            correct = question.get("correct_answer")
+            if isinstance(correct, str):
+                correct = json.loads(correct)
+            for label in [item["left"] for item in items]:
+                st.session_state[f"q{number}_match_{label}"] = (correct or {}).get(label, "A")
+
+
+def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
+    exam = get_exam(exam_id, teacher_id)
+    if not exam:
+        return
+    st.session_state.exam_wizard_mode = "edit"
+    st.session_state.edit_exam_id = exam_id
+    st.session_state.exam_wizard_general = {
+        "career": exam.get("career") or "",
+        "subject": exam.get("subject") or "",
+        "career_year": exam.get("career_year") or "",
+        "title": exam["title"],
+        "description": exam.get("description") or "",
+        "exam_date": exam.get("exam_date") or date.today().isoformat(),
+        "exam_time": exam.get("exam_time") or "09:00",
+        "question_count": len(exam["questions"]),
+        "max_score": float(exam["max_score"]),
+        "show_detail": bool(exam["show_detail_to_student"]),
+    }
+    _init_question_widgets_from_exam(exam["questions"])
+    st.session_state.exam_wizard_step = "general"
+    st.session_state.exam_wizard_page = 1
+
+
+def _reset_exam_wizard() -> None:
+    st.session_state.exam_wizard_step = "general"
+    st.session_state.exam_wizard_general = {}
+    st.session_state.exam_wizard_page = 1
+    st.session_state.exam_wizard_mode = "create"
+    st.session_state.edit_exam_id = None
+
+
 def _init_question_widgets(question_count: int) -> None:
     for number in range(1, question_count + 1):
         if f"q{number}_type_label" not in st.session_state:
@@ -502,43 +612,63 @@ def page_new_exam() -> None:
         st.rerun()
         return
 
-    st.subheader("Nuevo examen")
+    editing = st.session_state.exam_wizard_mode == "edit"
+    st.subheader("Editar examen" if editing else "Nuevo examen")
     step = st.session_state.exam_wizard_step
+    preset = st.session_state.exam_wizard_general
 
     if step == "general":
         st.markdown("### 1. Datos de la carrera y del examen")
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            career = st.text_input("Carrera *", placeholder="Medicina")
+            career = st.text_input("Carrera *", placeholder="Medicina", value=preset.get("career", ""))
         with col2:
-            subject = st.text_input("Asignatura *", placeholder="Fisiopatología")
+            subject = st.text_input("Asignatura *", placeholder="Fisiopatología", value=preset.get("subject", ""))
         with col3:
-            career_year = st.text_input("Año de la carrera *", placeholder="2°")
+            career_year = st.text_input("Año de la carrera *", placeholder="2°", value=preset.get("career_year", ""))
 
         title = st.text_input(
             "Nombre del examen *",
             placeholder="Parcial 2",
+            value=preset.get("title", ""),
             help="Ej. Parcial 1, Final, Recuperatorio",
         )
+
+        preset_date = date.today()
+        if preset.get("exam_date"):
+            try:
+                preset_date = date.fromisoformat(preset["exam_date"])
+            except ValueError:
+                pass
+        preset_time = time(9, 0)
+        if preset.get("exam_time"):
+            try:
+                hour, minute = preset["exam_time"].split(":")
+                preset_time = time(int(hour), int(minute))
+            except ValueError:
+                pass
 
         col_date, col_time = st.columns(2)
         with col_date:
             exam_date = st.date_input(
                 "Fecha del parcial *",
-                value=date.today(),
+                value=preset_date,
                 format="DD/MM/YYYY",
                 help="Elegí día, mes y año desde el calendario.",
             )
         with col_time:
             exam_time = st.time_input(
                 "Hora del parcial",
-                value=time(9, 0),
+                value=preset_time,
                 step=timedelta(minutes=5),
                 help="Podés ajustar la hora manualmente.",
             )
 
-        description = st.text_area("Instrucciones para el aula (opcional)")
+        description = st.text_area(
+            "Instrucciones para el aula (opcional)",
+            value=preset.get("description", ""),
+        )
 
         col4, col5, col6 = st.columns(3)
         with col4:
@@ -546,12 +676,20 @@ def page_new_exam() -> None:
                 "Cantidad total de preguntas *",
                 min_value=1,
                 max_value=200,
-                value=50,
+                value=int(preset.get("question_count", 50)),
             )
         with col5:
-            max_score = st.number_input("Nota máxima", min_value=1.0, value=10.0, step=0.5)
+            max_score = st.number_input(
+                "Nota máxima",
+                min_value=1.0,
+                value=float(preset.get("max_score", 10.0)),
+                step=0.5,
+            )
         with col6:
-            show_detail = st.checkbox("Mostrar preguntas falladas al alumno", value=True)
+            show_detail = st.checkbox(
+                "Mostrar preguntas falladas al alumno",
+                value=bool(preset.get("show_detail", True)),
+            )
 
         st.info(
             "En el siguiente paso configurarás **cada pregunta**: tipo, cantidad de opciones "
@@ -560,8 +698,9 @@ def page_new_exam() -> None:
 
         nav1, nav2 = st.columns([1, 1])
         with nav1:
-            if st.button("← Volver al panel"):
-                st.session_state.page = "panel"
+            if st.button("← Volver"):
+                _reset_exam_wizard()
+                st.session_state.page = "exam_detail" if editing else "panel"
                 st.rerun()
         with nav2:
             if st.button("Continuar → Clave de respuestas", type="primary"):
@@ -570,6 +709,7 @@ def page_new_exam() -> None:
                 elif not title.strip():
                     st.error("Completá el nombre del examen.")
                 else:
+                    previous_count = int(preset.get("question_count", 0))
                     st.session_state.exam_wizard_general = {
                         "career": career.strip(),
                         "subject": subject.strip(),
@@ -582,7 +722,8 @@ def page_new_exam() -> None:
                         "max_score": float(max_score),
                         "show_detail": show_detail,
                     }
-                    _init_question_widgets(int(question_count))
+                    if int(question_count) != previous_count:
+                        _init_question_widgets(int(question_count))
                     st.session_state.exam_wizard_step = "questions"
                     st.session_state.exam_wizard_page = 1
                     st.rerun()
@@ -630,34 +771,52 @@ def page_new_exam() -> None:
                 st.session_state.exam_wizard_page = current_page + 1
                 st.rerun()
         with nav4:
-            if st.button("Crear examen", type="primary"):
+            save_label = "Guardar cambios" if editing else "Crear examen"
+            if st.button(save_label, type="primary"):
                 try:
                     drafts = [_collect_question_draft(number) for number in range(1, question_count + 1)]
                     questions = build_all_questions(drafts)
-                    exam_id = create_exam(
-                        st.session_state.teacher["id"],
-                        general["title"],
-                        general["career"],
-                        general["subject"],
-                        general["career_year"],
-                        general.get("description") or None,
-                        general.get("exam_date"),
-                        general.get("exam_time"),
-                        general["max_score"],
-                        general["show_detail"],
-                        questions,
-                    )
-                    st.session_state.exam_id = exam_id
-                    st.session_state.exam_wizard_step = "general"
-                    st.session_state.exam_wizard_general = {}
-                    st.session_state.exam_wizard_page = 1
+                    if editing:
+                        update_exam(
+                            st.session_state.edit_exam_id,
+                            st.session_state.teacher["id"],
+                            general["title"],
+                            general["career"],
+                            general["subject"],
+                            general["career_year"],
+                            general.get("description") or None,
+                            general.get("exam_date"),
+                            general.get("exam_time"),
+                            general["max_score"],
+                            general["show_detail"],
+                            questions,
+                        )
+                        st.session_state.exam_id = st.session_state.edit_exam_id
+                        success_msg = "Examen actualizado."
+                    else:
+                        exam_id = create_exam(
+                            st.session_state.teacher["id"],
+                            general["title"],
+                            general["career"],
+                            general["subject"],
+                            general["career_year"],
+                            general.get("description") or None,
+                            general.get("exam_date"),
+                            general.get("exam_time"),
+                            general["max_score"],
+                            general["show_detail"],
+                            questions,
+                        )
+                        st.session_state.exam_id = exam_id
+                        success_msg = "Examen creado."
+                    _reset_exam_wizard()
                     st.session_state.page = "exam_detail"
-                    st.success("Examen creado.")
+                    st.success(success_msg)
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
                 except Exception as exc:
-                    st.error(f"No se pudo crear el examen: {exc}")
+                    st.error(f"No se pudo guardar el examen: {exc}")
 
 
 
@@ -675,6 +834,22 @@ def page_exam_detail() -> None:
     if st.button("← Volver al panel"):
         st.session_state.page = "panel"
         st.rerun()
+
+    action1, action2 = st.columns(2)
+    with action1:
+        if st.button("Editar examen y clave de respuestas", use_container_width=True):
+            _begin_edit_exam(exam["id"], st.session_state.teacher["id"])
+            st.session_state.page = "new_exam"
+            st.rerun()
+    with action2:
+        if st.button("Duplicar examen", use_container_width=True):
+            try:
+                new_id = duplicate_exam(exam["id"], st.session_state.teacher["id"])
+                st.session_state.exam_id = new_id
+                st.success("Examen duplicado.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"No se pudo duplicar: {exc}")
 
     st.subheader(exam["title"])
     schedule = format_exam_schedule(exam.get("exam_date"), exam.get("exam_time"))
@@ -736,7 +911,9 @@ def page_exam_detail() -> None:
             )
 
         options = [
-            f"{s['code']} · {(s.get('label') or 'Sin etiqueta')} · {s['submission_count']} alumnos cargaron"
+            f"{s['code']} · {(s.get('label') or 'Sin etiqueta')} · "
+            f"{s['submission_count']} alumnos · "
+            f"{'abierto' if is_session_open(s) else 'cerrado'}"
             for s in sessions
         ]
         default_index = 0
@@ -756,11 +933,25 @@ def page_exam_detail() -> None:
             key="active_session_code_select",
         )
         active = sessions[selected_index]
+        session_open = is_session_open(active)
 
-        metric1, metric2, metric3 = st.columns(3)
+        metric1, metric2, metric3, metric4 = st.columns(4)
         metric1.metric("Código para alumnos", active["code"])
         metric2.metric("Respuestas cargadas", active["submission_count"])
-        metric3.metric("Nota máxima", exam["max_score"])
+        metric3.metric("Estado", "Abierto" if session_open else "Cerrado")
+        metric4.metric("Nota máxima", exam["max_score"])
+
+        if session_open:
+            if st.button("Cerrar carga de respuestas", type="secondary"):
+                set_session_active(active["id"], st.session_state.teacher["id"], False)
+                st.success("Carga cerrada. Los alumnos ya no pueden enviar respuestas.")
+                st.rerun()
+        else:
+            st.warning("Este código está **cerrado**: los alumnos no pueden cargar respuestas nuevas.")
+            if st.button("Reabrir carga de respuestas"):
+                set_session_active(active["id"], st.session_state.teacher["id"], True)
+                st.success("Código reabierto.")
+                st.rerun()
 
         if st.button("Ver planilla de notas y descargar Excel", type="primary"):
             st.session_state.session_id = active["id"]

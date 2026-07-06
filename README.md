@@ -29,22 +29,35 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
+## Persistencia (PostgreSQL)
+
+Sin configuración extra, EvaluAR usa **SQLite** (ideal en local). En Streamlit Cloud los datos pueden perderse al reiniciar.
+
+Para producción, configurá **PostgreSQL** (Neon, Supabase, Railway, etc.):
+
+1. Creá una base PostgreSQL y copiá la URL de conexión.
+2. En Streamlit Cloud → **Settings → Secrets**, agregá:
+
+```toml
+DATABASE_URL = "postgresql://usuario:contraseña@host:5432/evaluar"
+```
+
+3. Reiniciá la app. En la barra lateral verás `Base de datos: PostgreSQL`.
+
+Plantilla local: `.streamlit/secrets.toml.example`
+
 ## Flujo
 
-1. **Docente** → Crear cuenta → Nuevo examen → pegar clave de respuestas (una por línea).
-2. **Generar sesión** → copiar link `?code=XXXX`.
-3. **Alumnos** → Rinden en papel → abren el link → cargan respuestas.
-4. **Docente** → Ve planilla con nombre, DNI, nota e ítems fallados → exporta CSV.
-
-## Nota sobre persistencia
-
-En Streamlit Cloud el almacenamiento SQLite es **efímero**: los datos pueden perderse al reiniciar la app. Para producción institucional conviene migrar a PostgreSQL (Supabase, Neon, etc.).
+1. **Docente** → Crear cuenta → Nuevo examen → clave de respuestas pregunta por pregunta.
+2. **Generar código del parcial** → compartir link, QR o WhatsApp.
+3. **Alumnos** → Rinden en papel → cargan respuestas con el código.
+4. **Docente** → Cierra la carga cuando termina la comisión → planilla y Excel.
 
 ## Stack
 
 - Python 3.10+
 - Streamlit
-- SQLite
+- SQLite o PostgreSQL
 
 ## Licencia
 

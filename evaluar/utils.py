@@ -18,6 +18,10 @@ def generate_id() -> str:
     return secrets.token_hex(12)
 
 
+def utc_now() -> str:
+    return datetime.utcnow().isoformat()
+
+
 def format_score(score: float) -> str:
     text = f"{score:.2f}"
     return text[:-3] if text.endswith(".00") else text
