@@ -31,7 +31,6 @@ from evaluar.database import (
     submit_answers,
     update_exam,
 )
-from evaluar.db_backend import database_label, is_ephemeral_storage
 from evaluar.answer_parser import letters_for_count
 from evaluar.question_builder import TYPE_CHOICES, TYPE_LABELS, build_all_questions, default_question_draft
 from evaluar.utils import (
@@ -400,17 +399,6 @@ def render_header() -> None:
     )
 
 
-def _render_storage_warning() -> None:
-    if not is_ephemeral_storage():
-        return
-    st.warning(
-        "**Los datos no se guardan entre reinicios.** Esta app usa SQLite en Streamlit Cloud: "
-        "cada redeploy borra cuentas docentes, exámenes y códigos. "
-        "Para producción, el administrador debe configurar **PostgreSQL** en "
-        "*Settings → Secrets* con la clave `DATABASE_URL`."
-    )
-
-
 def render_sidebar() -> None:
     st.sidebar.title("Navegación")
     if st.session_state.teacher:
@@ -445,9 +433,6 @@ def render_sidebar() -> None:
     teacher_total = _displayed_teacher_count()
     label = "docente usa" if teacher_total == 1 else "docentes usan"
     st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
-    st.sidebar.caption(f"Base de datos: {database_label()}")
-    if is_ephemeral_storage():
-        st.sidebar.error("SQLite en la nube: datos efímeros")
 
 
 def page_home() -> None:
@@ -492,7 +477,6 @@ def page_home() -> None:
 
 
 def page_auth() -> None:
-    _render_storage_warning()
     st.subheader("Acceso docente")
     tab_login, tab_register = st.tabs(["Iniciar sesión", "Crear cuenta"])
 
@@ -502,10 +486,7 @@ def page_auth() -> None:
         if st.button("Ingresar", type="primary"):
             teacher = login_teacher(name, pin)
             if not teacher:
-                st.error(
-                    "Credenciales incorrectas. Si la app se reinició recientemente, "
-                    "volvé a **Crear cuenta** (SQLite en la nube no guarda usuarios)."
-                )
+                st.error("Credenciales incorrectas.")
             else:
                 st.session_state.teacher = teacher
                 st.session_state.page = "panel"
