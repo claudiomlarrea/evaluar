@@ -436,7 +436,7 @@ def page_home() -> None:
             st.rerun()
     with col2:
         st.info(
-            "Pensado para carreras con alto volumen: 100 alumnos, 50 preguntas, "
+            "Pensado para carreras con alto volumen: 100 alumnos, 50 preguntas o más, "
             "opción múltiple, V/F y emparejamiento."
         )
 
