@@ -158,17 +158,20 @@ def _render_session_share(code: str, key_prefix: str) -> None:
     with share_col:
         components.html(
             f"""
-            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-              <button type="button" id="copy-code-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
-                border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
+            <div style="display:flex;flex-direction:column;gap:0.55rem;width:100%;">
+              <button type="button" id="copy-code-{html_id}" style="width:100%;box-sizing:border-box;
+                padding:0.7rem 0.85rem;border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;
+                cursor:pointer;font-size:0.9rem;font-weight:500;line-height:1.2;white-space:nowrap;">
                 Copiar código
               </button>
-              <button type="button" id="copy-url-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
-                border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;cursor:pointer;font-size:0.85rem;">
+              <button type="button" id="copy-url-{html_id}" style="width:100%;box-sizing:border-box;
+                padding:0.7rem 0.85rem;border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;
+                cursor:pointer;font-size:0.9rem;font-weight:500;line-height:1.2;white-space:nowrap;">
                 Copiar link directo
               </button>
-              <button type="button" id="copy-msg-{html_id}" style="flex:1;min-width:120px;padding:0.45rem 0.6rem;
-                border:1px solid #0d9488;border-radius:0.5rem;background:#0d9488;color:white;cursor:pointer;font-size:0.85rem;">
+              <button type="button" id="copy-msg-{html_id}" style="width:100%;box-sizing:border-box;
+                padding:0.7rem 0.85rem;border:1px solid #044A30;border-radius:0.5rem;background:#044A30;
+                color:white;cursor:pointer;font-size:0.9rem;font-weight:600;line-height:1.2;white-space:nowrap;">
                 Copiar mensaje WhatsApp
               </button>
             </div>
@@ -186,7 +189,7 @@ def _render_session_share(code: str, key_prefix: str) -> None:
             }};
             </script>
             """,
-            height=44,
+            height=148,
         )
 
 
