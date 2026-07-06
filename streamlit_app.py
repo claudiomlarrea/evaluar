@@ -32,6 +32,7 @@ from evaluar.database import (
     update_exam,
 )
 from evaluar.answer_parser import letters_for_count
+from evaluar.exam_backup import exam_backup_bytes, exam_backup_filename, parse_exam_backup
 from evaluar.question_builder import TYPE_CHOICES, TYPE_LABELS, build_all_questions, default_question_draft
 from evaluar.utils import (
     format_datetime,
@@ -107,6 +108,25 @@ def _export_excel(df: pd.DataFrame) -> bytes:
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Notas")
     return buffer.getvalue()
+
+
+def _render_local_backup_notice() -> None:
+    st.info(
+        "**Guardá todo en tu computadora.** EvaluAR usa almacenamiento temporal en la nube: "
+        "descargá y archivá cada **examen** (archivo `.json`) y cada **planilla de notas** "
+        "(Excel o CSV) en tu disco. Así conservás tus claves de respuestas y las notas "
+        "aunque la app se reinicie."
+    )
+
+
+def _render_exam_backup_download(exam: dict, *, label: str = "Descargar examen (.json)") -> None:
+    st.download_button(
+        label,
+        data=exam_backup_bytes(exam),
+        file_name=exam_backup_filename(exam),
+        mime="application/json",
+        use_container_width=True,
+    )
 
 
 def _student_query(code: str) -> str:
@@ -517,6 +537,8 @@ def page_panel() -> None:
         return
 
     st.subheader("Panel docente")
+    _render_local_backup_notice()
+
     if st.button("➕ Nuevo examen"):
         st.session_state.page = "new_exam"
         st.rerun()
@@ -556,6 +578,36 @@ def page_panel() -> None:
                             st.rerun()
                         except Exception as exc:
                             st.error(f"No se pudo duplicar: {exc}")
+                full_exam = get_exam(exam["id"], st.session_state.teacher["id"])
+                if full_exam:
+                    _render_exam_backup_download(
+                        full_exam,
+                        label="Guardar examen en mi computadora (.json)",
+                    )
+
+    with st.expander("Restaurar examen desde tu computadora"):
+        st.caption(
+            "Si tenés un archivo `.json` que descargaste antes, podés volver a cargar "
+            "el examen y su clave de respuestas."
+        )
+        uploaded = st.file_uploader(
+            "Archivo de examen",
+            type=["json"],
+            key="import_exam_backup",
+        )
+        if uploaded is not None and st.button("Importar examen", type="primary"):
+            try:
+                payload = parse_exam_backup(uploaded.read())
+                new_id = create_exam(st.session_state.teacher["id"], **payload)
+                st.session_state.exam_id = new_id
+                st.session_state.flash_download_exam = True
+                st.session_state.page = "exam_detail"
+                st.success("Examen importado. Descargalo de nuevo para tener una copia actualizada.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"No se pudo importar el examen: {exc}")
 
     with st.expander("Limpiar datos de prueba"):
         st.warning(
@@ -1003,6 +1055,7 @@ def page_new_exam() -> None:
                         )
                         st.session_state.exam_id = exam_id
                         success_msg = "Examen creado."
+                        st.session_state.flash_download_exam = True
                     _reset_exam_wizard()
                     st.session_state.page = "exam_detail"
                     st.success(success_msg)
@@ -1063,6 +1116,19 @@ def page_exam_detail() -> None:
     if exam.get("description"):
         st.info(exam["description"])
 
+    if st.session_state.pop("flash_download_exam", False):
+        st.success(
+            "Examen guardado en EvaluAR. **Descargalo ahora** y guardalo en tu computadora "
+            "para no perder la clave de respuestas."
+        )
+
+    st.markdown("### Respaldo en tu computadora")
+    st.caption(
+        "Descargá este archivo `.json` y guardalo en tu disco. Contiene el examen completo "
+        "y la clave de respuestas. Podés restaurarlo desde el panel docente si hace falta."
+    )
+    _render_exam_backup_download(exam, label="Descargar examen y clave (.json)")
+
     with st.expander("¿Cómo funciona el día del parcial?", expanded=False):
         st.markdown(
             """
@@ -1073,7 +1139,7 @@ def page_exam_detail() -> None:
             2. Enviá a los alumnos la **URL de EvaluAR** + el **código** (WhatsApp).
             3. Rinden en **papel** en el aula; recogen los cuadernillos.
             4. Los alumnos entran a EvaluAR → **Soy alumno** → cargan sus respuestas con el código.
-            5. Vos ves acá la **planilla de notas** y descargás Excel.
+            5. Vos ves acá la **planilla de notas**, descargás Excel o CSV y **guardás el archivo en tu computadora**.
             6. Cuando la comisión terminó de cargar, **cerrá el código** (debajo del QR).
 
             El código **no es** para rendir online: es para **cargar respuestas después** del parcial en papel.
@@ -1222,6 +1288,11 @@ def page_session_results() -> None:
     if submissions:
         df = _submissions_dataframe(submissions, float(exam["max_score"]))
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+        st.warning(
+            "**Guardá la planilla en tu computadora.** Descargá Excel o CSV y archivá el archivo "
+            "en tu disco: es tu copia permanente de las notas de esta comisión."
+        )
 
         col1, col2 = st.columns(2)
         with col1:
