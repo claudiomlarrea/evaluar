@@ -34,7 +34,15 @@ from evaluar.database import (
 from evaluar.db_backend import database_label, is_ephemeral_storage
 from evaluar.answer_parser import letters_for_count
 from evaluar.question_builder import TYPE_CHOICES, TYPE_LABELS, build_all_questions, default_question_draft
-from evaluar.utils import format_datetime, format_exam_schedule, format_score, is_session_open, question_type_label
+from evaluar.utils import (
+    format_datetime,
+    format_exam_schedule,
+    format_grading_summary,
+    format_score,
+    is_session_open,
+    question_total_points,
+    question_type_label,
+)
 
 QUESTIONS_PER_PAGE = 5
 ROOT_DIR = Path(__file__).resolve().parent
@@ -70,21 +78,29 @@ def _load_question_options(raw: str, qtype: str) -> tuple[list[str], list[dict[s
 
 
 def _submissions_dataframe(submissions: list[dict], max_score: float) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "Apellido y nombre": s["student_name"],
-                "DNI / Matrícula": s["student_dni"],
-                "Nota": s["score"],
-                "Aciertos": s["correct_count"],
-                "Errores": s["wrong_count"],
-                "Sin responder": s["unanswered_count"],
-                "Preguntas falladas": ", ".join(map(str, s["wrong_questions"])) or "—",
-                "Fecha de envío": format_datetime(s["submitted_at"]),
-            }
-            for s in submissions
-        ]
-    )
+    rows = []
+    for s in submissions:
+        row = {
+            "Apellido y nombre": s["student_name"],
+            "DNI / Matrícula": s["student_dni"],
+            "Nota (0-10)": s["score"],
+            "Aciertos": s["correct_count"],
+            "Errores": s["wrong_count"],
+            "Sin responder": s["unanswered_count"],
+            "Preguntas falladas": ", ".join(map(str, s["wrong_questions"])) or "—",
+            "Fecha de envío": format_datetime(s["submitted_at"]),
+        }
+        if s.get("earned_points") is not None and s.get("total_points") is not None:
+            row["Puntos obtenidos"] = s["earned_points"]
+            row["Puntos del examen"] = s["total_points"]
+            row["Resumen"] = format_grading_summary(
+                float(s["earned_points"]),
+                float(s["total_points"]),
+                max_score,
+                float(s["score"]),
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def _export_excel(df: pd.DataFrame) -> bytes:
@@ -582,6 +598,17 @@ def page_panel() -> None:
 
 
 def _render_question_editor(question_number: int) -> None:
+    scoring_mode = st.session_state.exam_wizard_general.get("scoring_mode", "equal")
+    if scoring_mode == "manual":
+        st.number_input(
+            "Puntaje de esta pregunta",
+            min_value=0.25,
+            max_value=100.0,
+            value=float(st.session_state.get(f"q{question_number}_points", 1.0)),
+            step=0.25,
+            key=f"q{question_number}_points",
+        )
+
     type_label = st.radio(
         "Tipo de pregunta",
         list(TYPE_CHOICES.keys()),
@@ -644,7 +671,14 @@ def _render_question_editor(question_number: int) -> None:
 def _collect_question_draft(question_number: int) -> dict:
     type_label = st.session_state.get(f"q{question_number}_type_label", "Opción múltiple")
     qtype = TYPE_CHOICES[type_label]
-    draft = {"order": question_number, "type": qtype}
+    scoring_mode = st.session_state.exam_wizard_general.get("scoring_mode", "equal")
+    draft = {
+        "order": question_number,
+        "type": qtype,
+        "points": 1.0 if scoring_mode == "equal" else float(
+            st.session_state.get(f"q{question_number}_points", 1.0)
+        ),
+    }
 
     if qtype == "MULTIPLE_CHOICE":
         draft["option_count"] = int(
@@ -694,6 +728,7 @@ def _init_question_widgets_from_exam(questions: list[dict]) -> None:
                 correct = json.loads(correct)
             for label in [item["left"] for item in items]:
                 st.session_state[f"q{number}_match_{label}"] = (correct or {}).get(label, "A")
+        st.session_state[f"q{number}_points"] = float(question.get("points") or 1)
 
 
 def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
@@ -713,6 +748,7 @@ def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
         "question_count": len(exam["questions"]),
         "max_score": float(exam["max_score"]),
         "show_detail": bool(exam["show_detail_to_student"]),
+        "scoring_mode": exam.get("scoring_mode") or "equal",
     }
     _init_question_widgets_from_exam(exam["questions"])
     st.session_state.exam_wizard_step = "general"
@@ -737,6 +773,7 @@ def _init_question_widgets(question_count: int) -> None:
             st.session_state[f"q{number}_vf_answer"] = defaults["vf_answer"]
             st.session_state[f"q{number}_target_count"] = defaults["target_count"]
             st.session_state[f"q{number}_item_count"] = defaults["item_count"]
+            st.session_state[f"q{number}_points"] = defaults["points"]
             for label in defaults["matching_items"]:
                 st.session_state[f"q{number}_match_{label}"] = defaults["matching_answers"][label]
 
@@ -826,9 +863,35 @@ def page_new_exam() -> None:
                 value=bool(preset.get("show_detail", True)),
             )
 
+        scoring_options = {
+            "Automático (1 punto por pregunta)": "equal",
+            "Manual (definís el puntaje de cada pregunta)": "manual",
+        }
+        preset_mode = preset.get("scoring_mode", "equal")
+        scoring_label = st.radio(
+            "Puntaje del examen",
+            list(scoring_options.keys()),
+            index=0 if preset_mode == "equal" else 1,
+            help=(
+                "La nota final siempre va de 0 a la nota máxima. "
+                "El sistema calcula: (puntos obtenidos ÷ puntos totales del examen) × nota máxima."
+            ),
+        )
+        scoring_mode = scoring_options[scoring_label]
+        if scoring_mode == "equal":
+            st.caption(
+                f"Modo automático: **{int(question_count)} preguntas = {int(question_count)} puntos** "
+                f"→ nota de 0 a {max_score}."
+            )
+        else:
+            st.caption(
+                "Modo manual: en el paso 2 asignás cuántos puntos vale cada pregunta. "
+                f"La suma de puntos se convierte a nota de 0 a {max_score}."
+            )
+
         st.info(
             "En el siguiente paso configurarás **cada pregunta**: tipo, cantidad de opciones "
-            "(si corresponde) y respuesta correcta."
+            "(si corresponde), respuesta correcta y —si elegiste manual— su puntaje."
         )
 
         nav1, nav2 = st.columns([1, 1])
@@ -856,6 +919,7 @@ def page_new_exam() -> None:
                         "question_count": int(question_count),
                         "max_score": float(max_score),
                         "show_detail": show_detail,
+                        "scoring_mode": scoring_mode,
                     }
                     if int(question_count) != previous_count:
                         _init_question_widgets(int(question_count))
@@ -876,11 +940,23 @@ def page_new_exam() -> None:
         current_page = max(1, min(current_page, total_pages))
 
         st.markdown("### 2. Clave de respuestas — pregunta por pregunta")
+        try:
+            preview_drafts = [_collect_question_draft(number) for number in range(1, question_count + 1)]
+            preview_total = question_total_points(build_all_questions(preview_drafts))
+        except ValueError:
+            preview_total = float(question_count)
+
+        st.info(
+            f"**Puntaje total del examen: {format_score(preview_total)} pts** · "
+            f"Nota final = (puntos del alumno ÷ {format_score(preview_total)}) × "
+            f"{general['max_score']} (escala 0 a {general['max_score']})."
+        )
         st.caption(
             f"{general['career']} · {general['subject']} · Año {general['career_year']} · "
             f"{general['title']} · "
             f"{format_exam_schedule(general.get('exam_date'), general.get('exam_time')) or 'Sin fecha'} · "
-            f"{question_count} preguntas"
+            f"{question_count} preguntas · "
+            f"{'1 pt/pregunta' if general.get('scoring_mode') == 'equal' else 'puntaje manual'}"
         )
 
         start = (current_page - 1) * QUESTIONS_PER_PAGE + 1
@@ -924,6 +1000,7 @@ def page_new_exam() -> None:
                             general.get("exam_time"),
                             general["max_score"],
                             general["show_detail"],
+                            general.get("scoring_mode", "equal"),
                             questions,
                         )
                         st.session_state.exam_id = st.session_state.edit_exam_id
@@ -940,6 +1017,7 @@ def page_new_exam() -> None:
                             general.get("exam_time"),
                             general["max_score"],
                             general["show_detail"],
+                            general.get("scoring_mode", "equal"),
                             questions,
                         )
                         st.session_state.exam_id = exam_id
@@ -987,12 +1065,19 @@ def page_exam_detail() -> None:
                 st.error(f"No se pudo duplicar: {exc}")
 
     st.subheader(exam["title"])
+    exam_points = question_total_points(exam["questions"])
+    scoring_label = (
+        "1 pt por pregunta"
+        if (exam.get("scoring_mode") or "equal") == "equal"
+        else "puntaje manual"
+    )
     schedule = format_exam_schedule(exam.get("exam_date"), exam.get("exam_time"))
     st.caption(
         f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
         f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
         f"{schedule + ' · ' if schedule else ''}"
-        f"{len(exam['questions'])} preguntas · Nota máxima {exam['max_score']}"
+        f"{len(exam['questions'])} preguntas · {format_score(exam_points)} pts totales · "
+        f"{scoring_label} · Nota 0-{exam['max_score']}"
     )
     if exam.get("description"):
         st.info(exam["description"])
@@ -1140,9 +1225,11 @@ def page_session_results() -> None:
     submissions = data["submissions"]
 
     st.subheader("Planilla de alumnos")
+    exam_points = question_total_points(data["questions"])
     st.caption(
         f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
-        f"{exam['title']} · Sesión {session['code']}"
+        f"{exam['title']} · Sesión {session['code']} · "
+        f"{format_score(exam_points)} pts totales · Nota 0-{exam['max_score']}"
     )
 
     avg = 0 if not submissions else sum(s["score"] for s in submissions) / len(submissions)
@@ -1202,11 +1289,14 @@ def page_student() -> None:
     questions = payload["questions"]
 
     st.subheader(exam["title"])
+    exam_points = question_total_points(questions)
     parts = [
         exam.get("career"),
         exam.get("subject"),
         f"Año {exam['career_year']}" if exam.get("career_year") else None,
         session.get("label"),
+        f"{format_score(exam_points)} pts totales",
+        f"Nota 0-{exam['max_score']}",
     ]
     st.caption(" · ".join(part for part in parts if part))
 
@@ -1218,6 +1308,15 @@ def page_student() -> None:
         result = st.session_state.student_result
         st.success("Respuestas enviadas correctamente.")
         st.metric("Tu nota", f"{format_score(result['score'])} / {result['max_score']}")
+        if result.get("earned_points") is not None and result.get("total_points") is not None:
+            st.info(
+                format_grading_summary(
+                    float(result["earned_points"]),
+                    float(result["total_points"]),
+                    float(result["max_score"]),
+                    float(result["score"]),
+                )
+            )
         c1, c2, c3 = st.columns(3)
         c1.metric("Aciertos", result["correct_count"])
         c2.metric("Errores", result["wrong_count"])

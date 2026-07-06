@@ -26,6 +26,7 @@ def default_question_draft(order: int) -> dict[str, Any]:
         "vf_answer": "V",
         "matching_items": ["a", "b", "c"],
         "matching_answers": {"a": "A", "b": "B", "c": "C"},
+        "points": 1.0,
     }
 
 
@@ -36,6 +37,9 @@ def item_labels(count: int) -> list[str]:
 def build_question(draft: dict[str, Any]) -> dict[str, Any]:
     order = int(draft["order"])
     qtype = draft["type"]
+    points = float(draft.get("points", 1))
+    if points <= 0:
+        raise ValueError(f"Pregunta {order}: el puntaje debe ser mayor a cero.")
 
     if qtype == "TRUE_FALSE":
         answer = str(draft.get("vf_answer", "V")).upper()
@@ -47,7 +51,7 @@ def build_question(draft: dict[str, Any]) -> dict[str, Any]:
             "prompt": None,
             "options": ["V", "F"],
             "correct_answer": answer,
-            "points": 1,
+            "points": points,
         }
 
     if qtype == "MULTIPLE_CHOICE":
@@ -64,7 +68,7 @@ def build_question(draft: dict[str, Any]) -> dict[str, Any]:
             "prompt": None,
             "options": options,
             "correct_answer": answer,
-            "points": 1,
+            "points": points,
         }
 
     if qtype == "MATCHING":
@@ -92,7 +96,7 @@ def build_question(draft: dict[str, Any]) -> dict[str, Any]:
                 "targets": targets,
             },
             "correct_answer": pairs,
-            "points": 1,
+            "points": points,
         }
 
     raise ValueError(f"Pregunta {order}: tipo desconocido.")

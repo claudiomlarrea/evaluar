@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import secrets
-import string
 from datetime import datetime
 
 
@@ -47,6 +46,25 @@ def format_exam_schedule(exam_date: str | None, exam_time: str | None = None) ->
     if exam_time:
         return f"{day} · {exam_time}"
     return day
+
+
+def question_total_points(questions: list[dict]) -> float:
+    return sum(float(q.get("points") or 1) for q in questions)
+
+
+def format_grading_summary(
+    earned_points: float,
+    total_points: float,
+    max_score: float,
+    score: float | None = None,
+) -> str:
+    final = score if score is not None else (
+        0.0 if total_points == 0 else round((earned_points / total_points) * max_score, 2)
+    )
+    return (
+        f"{format_score(earned_points)} / {format_score(total_points)} pts · "
+        f"Nota {format_score(final)} / {format_score(max_score)}"
+    )
 
 
 def question_type_label(qtype: str) -> str:

@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS exams (
     exam_time TEXT,
     max_score REAL NOT NULL DEFAULT 10,
     show_detail_to_student INTEGER NOT NULL DEFAULT 1,
+    scoring_mode TEXT NOT NULL DEFAULT 'equal',
     created_at TEXT NOT NULL,
     FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE
 );
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS submissions (
     student_dni TEXT NOT NULL,
     answers TEXT NOT NULL,
     score REAL NOT NULL,
+    earned_points REAL,
+    total_points REAL,
     correct_count INTEGER NOT NULL,
     wrong_count INTEGER NOT NULL,
     unanswered_count INTEGER NOT NULL,
@@ -87,19 +90,40 @@ def init_db() -> None:
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
         _migrate_exams(conn)
+        _migrate_submissions(conn)
 
 
 def _migrate_exams(conn: Any) -> None:
-    columns = ("career", "subject", "career_year", "exam_date", "exam_time")
+    columns = ("career", "subject", "career_year", "exam_date", "exam_time", "scoring_mode")
     if using_postgres():
         for column in columns:
             conn.execute(f"ALTER TABLE exams ADD COLUMN IF NOT EXISTS {column} TEXT")
+        conn.execute(
+            "UPDATE exams SET scoring_mode = 'equal' WHERE scoring_mode IS NULL OR scoring_mode = ''"
+        )
         return
 
     existing = {row[1] for row in conn.execute("PRAGMA table_info(exams)")}
     for column in columns:
         if column not in existing:
-            conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT")
+            default = " DEFAULT 'equal'" if column == "scoring_mode" else ""
+            conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT{default}")
+    conn.execute(
+        "UPDATE exams SET scoring_mode = 'equal' WHERE scoring_mode IS NULL OR scoring_mode = ''"
+    )
+
+
+def _migrate_submissions(conn: Any) -> None:
+    columns = ("earned_points", "total_points")
+    if using_postgres():
+        for column in columns:
+            conn.execute(f"ALTER TABLE submissions ADD COLUMN IF NOT EXISTS {column} REAL")
+        return
+
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(submissions)")}
+    for column in columns:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE submissions ADD COLUMN {column} REAL")
 
 
 def clear_all_exam_data() -> dict[str, int]:
@@ -222,6 +246,7 @@ def create_exam(
     exam_time: str | None,
     max_score: float,
     show_detail_to_student: bool,
+    scoring_mode: str,
     questions: list[dict[str, Any]],
 ) -> str:
     exam_id = generate_id()
@@ -230,9 +255,10 @@ def create_exam(
             """
             INSERT INTO exams (
                 id, teacher_id, title, course, career, subject, career_year,
-                description, exam_date, exam_time, max_score, show_detail_to_student, created_at
+                description, exam_date, exam_time, max_score, show_detail_to_student,
+                scoring_mode, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 exam_id,
@@ -247,6 +273,7 @@ def create_exam(
                 exam_time,
                 max_score,
                 1 if show_detail_to_student else 0,
+                scoring_mode,
                 utc_now(),
             ),
         )
@@ -266,6 +293,7 @@ def update_exam(
     exam_time: str | None,
     max_score: float,
     show_detail_to_student: bool,
+    scoring_mode: str,
     questions: list[dict[str, Any]],
 ) -> None:
     with get_connection() as conn:
@@ -281,7 +309,7 @@ def update_exam(
             UPDATE exams
             SET title = ?, course = ?, career = ?, subject = ?, career_year = ?,
                 description = ?, exam_date = ?, exam_time = ?, max_score = ?,
-                show_detail_to_student = ?
+                show_detail_to_student = ?, scoring_mode = ?
             WHERE id = ? AND teacher_id = ?
             """,
             (
@@ -295,6 +323,7 @@ def update_exam(
                 exam_time,
                 max_score,
                 1 if show_detail_to_student else 0,
+                scoring_mode,
                 exam_id,
                 teacher_id,
             ),
@@ -338,6 +367,7 @@ def duplicate_exam(exam_id: str, teacher_id: str) -> str:
         exam.get("exam_time"),
         float(exam["max_score"]),
         bool(exam["show_detail_to_student"]),
+        exam.get("scoring_mode") or "equal",
         questions,
     )
 
@@ -475,8 +505,9 @@ def submit_answers(
             """
             INSERT INTO submissions (
                 id, session_id, student_name, student_dni, answers, score,
+                earned_points, total_points,
                 correct_count, wrong_count, unanswered_count, wrong_questions, submitted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 submission_id,
@@ -485,6 +516,8 @@ def submit_answers(
                 dni,
                 json.dumps(answers),
                 result["score"],
+                result["earned_points"],
+                result["total_points"],
                 result["correct_count"],
                 result["wrong_count"],
                 result["unanswered_count"],
