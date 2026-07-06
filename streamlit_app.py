@@ -876,6 +876,7 @@ def page_exam_detail() -> None:
             3. Rinden en **papel** en el aula; recogen los cuadernillos.
             4. Los alumnos entran a EvaluAR → **Soy alumno** → cargan sus respuestas con el código.
             5. Vos ves acá la **planilla de notas** y descargás Excel.
+            6. Cuando la comisión terminó de cargar, **cerrá el código** (sección «Control de acceso»).
 
             El código **no es** para rendir online: es para **cargar respuestas después** del parcial en papel.
             """
@@ -904,7 +905,8 @@ def page_exam_detail() -> None:
     sessions = exam["sessions"]
     if not sessions:
         st.warning(
-            "Todavía no hay código. Hacé clic en **Generar código** antes de compartir con la comisión."
+            "Todavía no hay código. Hacé clic en **Generar código** arriba. "
+            "Después vas a poder compartirlo y **cerrarlo** cuando la comisión termine de cargar respuestas."
         )
     else:
         if len(sessions) > 1:
@@ -941,20 +943,39 @@ def page_exam_detail() -> None:
         metric1, metric2, metric3, metric4 = st.columns(4)
         metric1.metric("Código para alumnos", active["code"])
         metric2.metric("Respuestas cargadas", active["submission_count"])
-        metric3.metric("Estado", "Abierto" if session_open else "Cerrado")
+        metric3.metric("Estado del código", "Abierto" if session_open else "Cerrado")
         metric4.metric("Nota máxima", exam["max_score"])
 
+        st.markdown("#### Control de acceso de alumnos")
         if session_open:
-            if st.button("Cerrar carga de respuestas", type="secondary"):
+            st.warning(
+                "El código **está abierto**: los alumnos pueden seguir cargando respuestas. "
+                "Cuando la comisión terminó (o pasó el plazo), cerralo acá abajo."
+            )
+            if st.button(
+                "Cerrar código — no más respuestas de alumnos",
+                type="primary",
+                use_container_width=True,
+                key="close_session_btn",
+            ):
                 set_session_active(active["id"], st.session_state.teacher["id"], False)
-                st.success("Carga cerrada. Los alumnos ya no pueden enviar respuestas.")
+                st.success("Código cerrado. Los alumnos ya no pueden enviar respuestas.")
                 st.rerun()
         else:
-            st.warning("Este código está **cerrado**: los alumnos no pueden cargar respuestas nuevas.")
-            if st.button("Reabrir carga de respuestas"):
+            st.success(
+                "Código **cerrado**. Los alumnos ya no pueden cargar respuestas nuevas. "
+                "Vos seguís viendo la planilla y descargando Excel."
+            )
+            if st.button(
+                "Reabrir código para permitir más cargas",
+                use_container_width=True,
+                key="reopen_session_btn",
+            ):
                 set_session_active(active["id"], st.session_state.teacher["id"], True)
                 st.success("Código reabierto.")
                 st.rerun()
+
+        st.divider()
 
         if st.button("Ver planilla de notas y descargar Excel", type="primary"):
             st.session_state.session_id = active["id"]
