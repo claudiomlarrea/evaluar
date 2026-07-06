@@ -125,7 +125,7 @@ def _qr_png_bytes(url: str) -> bytes:
 
 
 def _render_session_share(code: str, key_prefix: str) -> None:
-    """Botones compactos para copiar URL, código o mensaje, con QR."""
+    """Botones para copiar código, URL, mensaje, QR y descargar QR."""
     code = code.upper()
     base_url = _app_base_url()
     share_url = _student_share_url(code)
@@ -135,15 +135,6 @@ def _render_session_share(code: str, key_prefix: str) -> None:
         st.caption(f"URL EvaluAR: `{base_url}` · Código: **`{code}`**")
     else:
         st.caption(f"Código del parcial: **`{code}`** (copiá también la URL desde el navegador)")
-
-    if share_url:
-        col_qr, col_actions = st.columns([1, 2])
-        with col_qr:
-            st.image(_qr_png_bytes(share_url), width=130)
-            st.caption("QR para proyectar en el aula")
-        share_col = col_actions
-    else:
-        share_col = st.container()
 
     code_js = json.dumps(code)
     share_js = json.dumps(share_url)
@@ -155,23 +146,88 @@ def _render_session_share(code: str, key_prefix: str) -> None:
         + "En la app elegí «Soy alumno» e ingresá el código."
     )
 
-    with share_col:
+    btn_style = (
+        "width:100%;box-sizing:border-box;padding:0.7rem 0.85rem;border-radius:0.5rem;"
+        "cursor:pointer;font-size:0.9rem;font-weight:500;line-height:1.2;white-space:nowrap;"
+    )
+    btn_outline = (
+        f"{btn_style}border:1px solid #cbd5e1;background:#fff;color:#0f172a;"
+    )
+    btn_primary = (
+        f"{btn_style}border:1px solid #044A30;background:#044A30;color:#fff;font-weight:600;"
+    )
+
+    if share_url:
+        qr_b64 = base64.b64encode(_qr_png_bytes(share_url)).decode("ascii")
         components.html(
             f"""
-            <div style="display:flex;flex-direction:column;gap:0.55rem;width:100%;">
-              <button type="button" id="copy-code-{html_id}" style="width:100%;box-sizing:border-box;
-                padding:0.7rem 0.85rem;border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;
-                cursor:pointer;font-size:0.9rem;font-weight:500;line-height:1.2;white-space:nowrap;">
+            <div style="display:flex;gap:1rem;align-items:flex-start;font-family:sans-serif;">
+              <div style="text-align:center;flex-shrink:0;">
+                <img id="qr-{html_id}" src="data:image/png;base64,{qr_b64}" width="130" height="130"
+                     alt="QR EvaluAR" style="display:block;border:1px solid #e2e8f0;border-radius:0.5rem;" />
+                <p style="margin:0.35rem 0 0;font-size:0.78rem;color:#64748b;">QR para el aula</p>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:0.55rem;min-width:180px;">
+                <button type="button" id="copy-code-{html_id}" style="{btn_outline}">
+                  Copiar código
+                </button>
+                <button type="button" id="copy-url-{html_id}" style="{btn_outline}">
+                  Copiar URL de EvaluAR
+                </button>
+                <button type="button" id="copy-link-{html_id}" style="{btn_outline}">
+                  Copiar link directo
+                </button>
+                <button type="button" id="copy-msg-{html_id}" style="{btn_primary}">
+                  Copiar mensaje WhatsApp
+                </button>
+                <button type="button" id="copy-qr-{html_id}" style="{btn_outline}">
+                  Copiar QR
+                </button>
+                <a id="download-qr-{html_id}" download="evaluar-{code}.png"
+                   href="data:image/png;base64,{qr_b64}"
+                   style="{btn_outline}display:block;text-align:center;text-decoration:none;">
+                  Descargar QR (PNG)
+                </a>
+              </div>
+            </div>
+            <script>
+            document.getElementById("copy-code-{html_id}").onclick = function() {{
+                navigator.clipboard.writeText({code_js});
+            }};
+            document.getElementById("copy-url-{html_id}").onclick = function() {{
+                const url = {base_js};
+                if (url) navigator.clipboard.writeText(url);
+                else alert("Copiá la URL desde la barra del navegador.");
+            }};
+            document.getElementById("copy-link-{html_id}").onclick = function() {{
+                const url = {share_js};
+                if (url) navigator.clipboard.writeText(url);
+                else alert("No hay link directo disponible.");
+            }};
+            document.getElementById("copy-msg-{html_id}").onclick = function() {{
+                navigator.clipboard.writeText({message_js});
+            }};
+            document.getElementById("copy-qr-{html_id}").onclick = async function() {{
+                try {{
+                    const response = await fetch(document.getElementById("qr-{html_id}").src);
+                    const blob = await response.blob();
+                    await navigator.clipboard.write([new ClipboardItem({{ "image/png": blob }})]);
+                }} catch (error) {{
+                    alert("No se pudo copiar el QR. Usá «Descargar QR (PNG)».");
+                }}
+            }};
+            </script>
+            """,
+            height=300,
+        )
+    else:
+        components.html(
+            f"""
+            <div style="display:flex;flex-direction:column;gap:0.55rem;width:100%;font-family:sans-serif;">
+              <button type="button" id="copy-code-{html_id}" style="{btn_outline}">
                 Copiar código
               </button>
-              <button type="button" id="copy-url-{html_id}" style="width:100%;box-sizing:border-box;
-                padding:0.7rem 0.85rem;border:1px solid #cbd5e1;border-radius:0.5rem;background:#fff;
-                cursor:pointer;font-size:0.9rem;font-weight:500;line-height:1.2;white-space:nowrap;">
-                Copiar link directo
-              </button>
-              <button type="button" id="copy-msg-{html_id}" style="width:100%;box-sizing:border-box;
-                padding:0.7rem 0.85rem;border:1px solid #044A30;border-radius:0.5rem;background:#044A30;
-                color:white;cursor:pointer;font-size:0.9rem;font-weight:600;line-height:1.2;white-space:nowrap;">
+              <button type="button" id="copy-msg-{html_id}" style="{btn_primary}">
                 Copiar mensaje WhatsApp
               </button>
             </div>
@@ -179,17 +235,12 @@ def _render_session_share(code: str, key_prefix: str) -> None:
             document.getElementById("copy-code-{html_id}").onclick = function() {{
                 navigator.clipboard.writeText({code_js});
             }};
-            document.getElementById("copy-url-{html_id}").onclick = function() {{
-                const url = {share_js} || {base_js};
-                if (url) navigator.clipboard.writeText(url);
-                else alert("Copiá la URL desde la barra del navegador.");
-            }};
             document.getElementById("copy-msg-{html_id}").onclick = function() {{
                 navigator.clipboard.writeText({message_js});
             }};
             </script>
             """,
-            height=148,
+            height=120,
         )
 
 
