@@ -6,241 +6,161 @@ from __future__ import annotations
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGO = ROOT / "assets" / "logo-observatorio-ia.png"
 OUTPUT = ROOT / "assets" / "flyer-webinar-evaluar-16julio-2026.pdf"
+DOCS_OUTPUT = Path.home() / "Documents" / "EvaluAR" / "flyer-webinar-evaluar-16julio-2026.pdf"
 
-RED = colors.HexColor("#7a1532")
 RED_DARK = colors.HexColor("#4a0c1f")
+RED = colors.HexColor("#7a1532")
 YELLOW = colors.HexColor("#F4B400")
 GREEN = colors.HexColor("#064a38")
 GREEN_MID = colors.HexColor("#0d6e4f")
 WHITE = colors.white
 TEXT = colors.HexColor("#1f1418")
-TEXT_SOFT = colors.HexColor("#5c4f54")
 
 MEET_URL = "https://meet.google.com/aid-icaq-wjz"
+MEET_LABEL = "meet.google.com/aid-icaq-wjz"
 
 
-class FlyerCanvas(canvas.Canvas):
-  def __init__(self, *args, **kwargs):
-    super().__init__(*args, **kwargs)
-    self._saved_page_states = []
+def _centered_link(c: canvas.Canvas, text: str, url: str, y: float, font: str, size: float) -> None:
+    width = c.stringWidth(text, font, size)
+    x = (A4[0] - width) / 2
+    c.setFont(font, size)
+    c.drawString(x, y, text)
+    c.linkURL(url, (x, y - 2, x + width, y + size + 2), relative=0)
 
-  def showPage(self):
-    self._saved_page_states.append(dict(self.__dict__))
-    self._startPage()
 
-  def save(self):
-    num_pages = len(self._saved_page_states)
-    for state in self._saved_page_states:
-      self.__dict__.update(state)
-      self.draw_page_background()
-      super().showPage()
-    super().save()
+def _wrap_lines(text: str, max_width: float, c: canvas.Canvas, font: str, size: float) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        trial = f"{current} {word}".strip()
+        if c.stringWidth(trial, font, size) <= max_width:
+            current = trial
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
 
-  def draw_page_background(self):
+
+def build_pdf(output: Path = OUTPUT) -> Path:
     w, h = A4
-    self.setFillColor(RED_DARK)
-    self.rect(0, h - 95 * mm, w, 95 * mm, fill=1, stroke=0)
-    self.setFillColor(YELLOW)
-    self.rect(0, h - 112 * mm, w, 17 * mm, fill=1, stroke=0)
-    self.setFillColor(GREEN)
-    self.rect(0, 0, w, 32 * mm, fill=1, stroke=0)
+    margin = 18 * mm
+    content_w = w - 2 * margin
 
+    header_h = 98 * mm
+    date_h = 16 * mm
+    footer_h = 38 * mm
 
-def build_pdf() -> None:
-  doc = SimpleDocTemplate(
-    str(OUTPUT),
-    pagesize=A4,
-    leftMargin=18 * mm,
-    rightMargin=18 * mm,
-    topMargin=14 * mm,
-    bottomMargin=36 * mm,
-  )
+    c = canvas.Canvas(str(output), pagesize=A4)
 
-  styles = getSampleStyleSheet()
-  title = ParagraphStyle(
-    "Title",
-    parent=styles["Heading1"],
-    fontName="Helvetica-Bold",
-    fontSize=26,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    spaceAfter=2,
-  )
-  subtitle = ParagraphStyle(
-    "Subtitle",
-    parent=styles["Normal"],
-    fontName="Helvetica",
-    fontSize=11,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    spaceAfter=4,
-  )
-  kicker = ParagraphStyle(
-    "Kicker",
-    parent=styles["Normal"],
-    fontName="Helvetica-Bold",
-    fontSize=9,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    spaceAfter=2,
-    leading=11,
-  )
-  date_style = ParagraphStyle(
-    "Date",
-    parent=styles["Normal"],
-    fontName="Helvetica-Bold",
-    fontSize=13,
-    textColor=TEXT,
-    alignment=TA_CENTER,
-    leading=16,
-  )
-  body = ParagraphStyle(
-    "Body",
-    parent=styles["Normal"],
-    fontName="Helvetica",
-    fontSize=11.5,
-    textColor=TEXT,
-    alignment=TA_LEFT,
-    leading=16,
-    spaceAfter=6,
-  )
-  question = ParagraphStyle(
-    "Question",
-    parent=body,
-    fontName="Helvetica-Bold",
-    fontSize=13,
-    spaceAfter=10,
-  )
-  speaker = ParagraphStyle(
-    "Speaker",
-    parent=styles["Normal"],
-    fontName="Helvetica-Bold",
-    fontSize=12,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    leading=15,
-  )
-  footer_title = ParagraphStyle(
-    "FooterTitle",
-    parent=styles["Normal"],
-    fontName="Helvetica-Bold",
-    fontSize=11,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    leading=13,
-  )
-  footer_link = ParagraphStyle(
-    "FooterLink",
-    parent=styles["Normal"],
-    fontName="Helvetica-Bold",
-    fontSize=12,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    leading=14,
-  )
-  footer_note = ParagraphStyle(
-    "FooterNote",
-    parent=styles["Normal"],
-    fontName="Helvetica",
-    fontSize=9,
-    textColor=WHITE,
-    alignment=TA_CENTER,
-    leading=11,
-  )
+    # Bandas de fondo (debajo del texto)
+    c.setFillColor(RED_DARK)
+    c.rect(0, h - header_h, w, header_h, fill=1, stroke=0)
+    c.setFillColor(YELLOW)
+    c.rect(0, h - header_h - date_h, w, date_h, fill=1, stroke=0)
+    c.setFillColor(GREEN)
+    c.rect(0, 0, w, footer_h, fill=1, stroke=0)
 
-  logo_w = 42 * mm
-  logo = Table(
-    [[Paragraph(
-      f'<img src="{LOGO}" width="{logo_w}" height="{logo_w}"/>',
-      ParagraphStyle("img", alignment=TA_CENTER),
-    )]],
-    colWidths=[doc.width],
-  )
-
-  story = [
-    logo,
-    Spacer(1, 4 * mm),
-    Paragraph("UNIVERSIDAD CATÓLICA DE CUYO", kicker),
-    Paragraph("Observatorio de Inteligencia Artificial", subtitle),
-    Spacer(1, 3 * mm),
-    Paragraph("WEBINAR", kicker),
-    Paragraph("EvaluAR", title),
-    Paragraph("Examen en papel · Corrección digital", subtitle),
-    Spacer(1, 22 * mm),
-    Paragraph("Jueves 16 de julio · 18:00 – 19:00 hs", date_style),
-    Spacer(1, 10 * mm),
-    Paragraph(
-      "¿Cómo evaluar parciales presenciales con cientos de alumnos en minutos?",
-      question,
-    ),
-    Paragraph("• Los alumnos rinden en papel y cargan respuestas desde el celular", body),
-    Paragraph("• El docente configura la clave y el sistema corrige al instante", body),
-    Paragraph("• Planilla de notas y exportación a Excel", body),
-    Paragraph(
-      "Dirigido a <b>docentes, investigadores y demás interesados</b>.",
-      body,
-    ),
-    Spacer(1, 6 * mm),
-  ]
-
-  speaker_box = Table(
-    [[Paragraph("Disertante: Dr. Claudio Marcelo Larrea", speaker)]],
-    colWidths=[doc.width],
-  )
-  speaker_box.setStyle(
-    TableStyle(
-      [
-        ("BACKGROUND", (0, 0), (-1, -1), GREEN_MID),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("TOPPADDING", (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ("ROUNDEDCORNERS", [6, 6, 6, 6]),
-      ]
+    # Logo
+    logo_size = 36 * mm
+    logo_y = h - header_h + 42 * mm
+    c.drawImage(
+        ImageReader(str(LOGO)),
+        (w - logo_size) / 2,
+        logo_y,
+        logo_size,
+        logo_size,
+        mask="auto",
     )
-  )
-  story.append(speaker_box)
-  story.append(Spacer(1, 28 * mm))
 
-  footer = Table(
-    [
-      [Paragraph("Google Meet · EvaluAR", footer_title)],
-      [
-        Paragraph(
-          f'<a href="{MEET_URL}" color="white">meet.google.com/aid-icaq-wjz</a>',
-          footer_link,
-        )
-      ],
-      [Paragraph("Inscripción gratuita · Cupo abierto", footer_note)],
-    ],
-    colWidths=[doc.width],
-  )
-  footer.setStyle(
-    TableStyle(
-      [
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-      ]
-    )
-  )
-  story.append(footer)
+    # Encabezado
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.drawCentredString(w / 2, logo_y - 5 * mm, "UNIVERSIDAD CATÓLICA DE CUYO")
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(w / 2, logo_y - 10 * mm, "Observatorio de Inteligencia Artificial")
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(w / 2, logo_y - 18 * mm, "WEBINAR")
+    c.setFont("Helvetica-Bold", 28)
+    c.drawCentredString(w / 2, logo_y - 30 * mm, "EvaluAR")
+    c.setFont("Helvetica", 11)
+    c.drawCentredString(w / 2, logo_y - 37 * mm, "Examen en papel · Corrección digital")
 
-  doc.build(story, canvasmaker=FlyerCanvas)
-  print(f"PDF generado: {OUTPUT}")
+    # Fecha
+    c.setFillColor(TEXT)
+    c.setFont("Helvetica-Bold", 13)
+    date_y = h - header_h - date_h + 5 * mm
+    c.drawCentredString(w / 2, date_y, "Jueves 16 de julio · 18:00 – 19:00 hs")
+
+    # Cuerpo
+    body_top = h - header_h - date_h - 12 * mm
+    c.setFillColor(TEXT)
+    c.setFont("Helvetica-Bold", 13)
+    question = "¿Cómo evaluar parciales presenciales con cientos de alumnos en minutos?"
+    y = body_top
+    for line in _wrap_lines(question, content_w, c, "Helvetica-Bold", 13):
+        c.drawString(margin, y, line)
+        y -= 16
+
+    y -= 4
+    c.setFont("Helvetica", 11.5)
+    bullets = [
+        "• Los alumnos rinden en papel y cargan respuestas desde el celular",
+        "• El docente configura la clave y el sistema corrige al instante",
+        "• Planilla de notas y exportación a Excel",
+    ]
+    for bullet in bullets:
+        for line in _wrap_lines(bullet, content_w - 4 * mm, c, "Helvetica", 11.5):
+            c.drawString(margin + 2 * mm, y, line)
+            y -= 15
+        y -= 2
+
+    y -= 2
+    audience = "Dirigido a docentes, investigadores y demás interesados."
+    c.setFont("Helvetica-Bold", 11.5)
+    for line in _wrap_lines(audience, content_w, c, "Helvetica-Bold", 11.5):
+        c.drawString(margin, y, line)
+        y -= 15
+
+    # Caja disertante
+    speaker_y = y - 8 * mm
+    box_h = 14 * mm
+    box_w = content_w
+    box_x = margin
+    c.setFillColor(GREEN_MID)
+    c.roundRect(box_x, speaker_y, box_w, box_h, 5, fill=1, stroke=0)
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(w / 2, speaker_y + 4.5 * mm, "Disertante: Dr. Claudio Marcelo Larrea")
+
+    # Pie con enlace clicable
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawCentredString(w / 2, 24 * mm, "Google Meet · EvaluAR")
+    _centered_link(c, MEET_LABEL, MEET_URL, 16 * mm, "Helvetica-Bold", 12)
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(w / 2, 8 * mm, "Inscripción gratuita · Cupo abierto")
+
+    c.save()
+    return output
 
 
 if __name__ == "__main__":
-  if not LOGO.is_file():
-    raise SystemExit(f"No se encontró el logo: {LOGO}")
-  build_pdf()
+    if not LOGO.is_file():
+        raise SystemExit(f"No se encontró el logo: {LOGO}")
+    path = build_pdf()
+    print(f"PDF generado: {path}")
+    DOCS_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    build_pdf(DOCS_OUTPUT)
+    print(f"Copiado a: {DOCS_OUTPUT}")
