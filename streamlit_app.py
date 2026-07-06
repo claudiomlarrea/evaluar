@@ -59,9 +59,16 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+@st.cache_resource
+def _initialize_database() -> bool:
+    init_db()
+    return True
+
+
 def _bootstrap_db() -> None:
     try:
-        init_db()
+        _initialize_database()
     except Exception as exc:
         from evaluar.db_backend import using_postgres
 
@@ -399,7 +406,12 @@ def _render_session_delete(active: dict, teacher_id: str) -> None:
         if confirm.strip().upper() != str(active["code"]).upper():
             st.error(f"Escribí {active['code']} para confirmar.")
         else:
-            deleted = delete_session(active["id"], teacher_id)
+            with st.spinner("Eliminando código..."):
+                try:
+                    deleted = delete_session(active["id"], teacher_id)
+                except Exception as exc:
+                    st.error(f"No se pudo eliminar el código: {exc}")
+                    return
             if not deleted:
                 st.error("No se pudo eliminar el código.")
             else:
@@ -407,6 +419,7 @@ def _render_session_delete(active: dict, teacher_id: str) -> None:
                     st.session_state.session_id = None
                 if st.session_state.get("flash_session_code") == active["code"]:
                     st.session_state.flash_session_code = None
+                st.session_state.pop(f"delete_session_confirm_{active['id']}", None)
                 st.success(f"Código {active['code']} eliminado.")
                 st.rerun()
 

@@ -459,6 +459,7 @@ def delete_session(session_id: str, teacher_id: str) -> dict[str, Any] | None:
         if not row:
             return None
         session = row_to_dict(row) or {}
+        conn.execute("DELETE FROM submissions WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
     return session
 
