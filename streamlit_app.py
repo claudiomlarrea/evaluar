@@ -156,6 +156,35 @@ def _render_session_share(code: str, key_prefix: str) -> None:
     btn_primary = (
         f"{btn_style}border:1px solid #044A30;background:#044A30;color:#fff;font-weight:600;"
     )
+    copy_feedback_js = """
+            function markCopied(btn, doneLabel) {
+              if (!btn.dataset.originalLabel) {
+                btn.dataset.originalLabel = btn.innerText;
+                btn.dataset.originalStyle = btn.getAttribute("style") || "";
+              }
+              btn.innerText = doneLabel || "✓ Copiado";
+              btn.style.background = "#dcfce7";
+              btn.style.borderColor = "#16a34a";
+              btn.style.color = "#166534";
+              btn.style.fontWeight = "600";
+              setTimeout(function() {
+                btn.innerText = btn.dataset.originalLabel;
+                btn.setAttribute("style", btn.dataset.originalStyle);
+              }, 2000);
+            }
+            async function copyText(btn, text, emptyMsg) {
+              if (!text) {
+                alert(emptyMsg || "No hay contenido para copiar.");
+                return;
+              }
+              try {
+                await navigator.clipboard.writeText(text);
+                markCopied(btn);
+              } catch (error) {
+                alert("No se pudo copiar. Probá de nuevo.");
+              }
+            }
+    """
 
     if share_url:
         qr_b64 = base64.b64encode(_qr_png_bytes(share_url)).decode("ascii")
@@ -189,33 +218,32 @@ def _render_session_share(code: str, key_prefix: str) -> None:
                 </button>
                 <a id="download-qr-{html_id}" download="evaluar-{code}.png"
                    href="data:image/png;base64,{qr_b64}"
+                   onclick="markCopied(this, '✓ Descargado');"
                    style="{btn_outline}display:block;text-align:center;text-decoration:none;">
                   Descargar QR (PNG)
                 </a>
               </div>
             </div>
             <script>
+            {copy_feedback_js}
             document.getElementById("copy-code-{html_id}").onclick = function() {{
-                navigator.clipboard.writeText({code_js});
+                copyText(this, {code_js});
             }};
             document.getElementById("copy-url-{html_id}").onclick = function() {{
-                const url = {base_js};
-                if (url) navigator.clipboard.writeText(url);
-                else alert("Copiá la URL desde la barra del navegador.");
+                copyText(this, {base_js}, "Copiá la URL desde la barra del navegador.");
             }};
             document.getElementById("copy-link-{html_id}").onclick = function() {{
-                const url = {share_js};
-                if (url) navigator.clipboard.writeText(url);
-                else alert("No hay link directo disponible.");
+                copyText(this, {share_js}, "No hay link directo disponible.");
             }};
             document.getElementById("copy-msg-{html_id}").onclick = function() {{
-                navigator.clipboard.writeText({message_js});
+                copyText(this, {message_js});
             }};
             document.getElementById("copy-qr-{html_id}").onclick = async function() {{
                 try {{
                     const response = await fetch(document.getElementById("qr-{html_id}").src);
                     const blob = await response.blob();
                     await navigator.clipboard.write([new ClipboardItem({{ "image/png": blob }})]);
+                    markCopied(this);
                 }} catch (error) {{
                     alert("No se pudo copiar el QR. Usá «Descargar QR (PNG)».");
                 }}
@@ -236,11 +264,12 @@ def _render_session_share(code: str, key_prefix: str) -> None:
               </button>
             </div>
             <script>
+            {copy_feedback_js}
             document.getElementById("copy-code-{html_id}").onclick = function() {{
-                navigator.clipboard.writeText({code_js});
+                copyText(this, {code_js});
             }};
             document.getElementById("copy-msg-{html_id}").onclick = function() {{
-                navigator.clipboard.writeText({message_js});
+                copyText(this, {message_js});
             }};
             </script>
             """,
