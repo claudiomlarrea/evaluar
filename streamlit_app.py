@@ -159,6 +159,10 @@ def _render_session_share(code: str, key_prefix: str) -> None:
 
     if share_url:
         qr_b64 = base64.b64encode(_qr_png_bytes(share_url)).decode("ascii")
+        st.caption(
+            f"**Link para alumnos** (con código incluido): `{share_url}` — "
+            "el alumno abre EvaluAR y ya entra a cargar respuestas."
+        )
         components.html(
             f"""
             <div style="display:flex;gap:1rem;align-items:flex-start;font-family:sans-serif;">
@@ -175,7 +179,7 @@ def _render_session_share(code: str, key_prefix: str) -> None:
                   Copiar URL de EvaluAR
                 </button>
                 <button type="button" id="copy-link-{html_id}" style="{btn_outline}">
-                  Copiar link directo
+                  Copiar link para alumnos
                 </button>
                 <button type="button" id="copy-msg-{html_id}" style="{btn_primary}">
                   Copiar mensaje WhatsApp
@@ -242,6 +246,37 @@ def _render_session_share(code: str, key_prefix: str) -> None:
             """,
             height=120,
         )
+
+
+def _render_session_access_control(active: dict, teacher_id: str) -> None:
+    session_open = is_session_open(active)
+    st.markdown("#### Cerrar código del parcial")
+    if session_open:
+        st.warning(
+            "El código **está abierto**: los alumnos pueden seguir cargando respuestas. "
+            "Cuando la comisión terminó, usá el botón de abajo."
+        )
+        if st.button(
+            "Cerrar código — no más respuestas de alumnos",
+            type="primary",
+            use_container_width=True,
+            key=f"close_session_{active['id']}",
+        ):
+            set_session_active(active["id"], teacher_id, False)
+            st.success("Código cerrado. Los alumnos ya no pueden enviar respuestas.")
+            st.rerun()
+    else:
+        st.success(
+            "Código **cerrado**. Los alumnos ya no pueden cargar respuestas nuevas."
+        )
+        if st.button(
+            "Reabrir código para permitir más cargas",
+            use_container_width=True,
+            key=f"reopen_session_{active['id']}",
+        ):
+            set_session_active(active["id"], teacher_id, True)
+            st.success("Código reabierto.")
+            st.rerun()
 
 
 def ensure_state() -> None:
@@ -927,7 +962,7 @@ def page_exam_detail() -> None:
             3. Rinden en **papel** en el aula; recogen los cuadernillos.
             4. Los alumnos entran a EvaluAR → **Soy alumno** → cargan sus respuestas con el código.
             5. Vos ves acá la **planilla de notas** y descargás Excel.
-            6. Cuando la comisión terminó de cargar, **cerrá el código** (sección «Control de acceso»).
+            6. Cuando la comisión terminó de cargar, **cerrá el código** (debajo del QR).
 
             El código **no es** para rendir online: es para **cargar respuestas después** del parcial en papel.
             """
@@ -997,37 +1032,6 @@ def page_exam_detail() -> None:
         metric3.metric("Estado del código", "Abierto" if session_open else "Cerrado")
         metric4.metric("Nota máxima", exam["max_score"])
 
-        st.markdown("#### Control de acceso de alumnos")
-        if session_open:
-            st.warning(
-                "El código **está abierto**: los alumnos pueden seguir cargando respuestas. "
-                "Cuando la comisión terminó (o pasó el plazo), cerralo acá abajo."
-            )
-            if st.button(
-                "Cerrar código — no más respuestas de alumnos",
-                type="primary",
-                use_container_width=True,
-                key="close_session_btn",
-            ):
-                set_session_active(active["id"], st.session_state.teacher["id"], False)
-                st.success("Código cerrado. Los alumnos ya no pueden enviar respuestas.")
-                st.rerun()
-        else:
-            st.success(
-                "Código **cerrado**. Los alumnos ya no pueden cargar respuestas nuevas. "
-                "Vos seguís viendo la planilla y descargando Excel."
-            )
-            if st.button(
-                "Reabrir código para permitir más cargas",
-                use_container_width=True,
-                key="reopen_session_btn",
-            ):
-                set_session_active(active["id"], st.session_state.teacher["id"], True)
-                st.success("Código reabierto.")
-                st.rerun()
-
-        st.divider()
-
         if st.button("Ver planilla de notas y descargar Excel", type="primary"):
             st.session_state.session_id = active["id"]
             st.session_state.page = "session_results"
@@ -1035,6 +1039,9 @@ def page_exam_detail() -> None:
 
         st.markdown("**Enviar a la comisión (después de rendir en papel)**")
         _render_session_share(active["code"], "active_session")
+
+        st.divider()
+        _render_session_access_control(active, st.session_state.teacher["id"])
 
         if len(sessions) > 1:
             with st.expander("Ver todos los códigos generados"):
