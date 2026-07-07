@@ -21,10 +21,11 @@ from evaluar.database import (
     create_session,
     duplicate_exam,
     delete_session,
+    ensure_migrations,
     get_exam,
     get_session_by_code,
     get_session_results,
-    init_db,
+    init_schema,
     list_exams,
     login_teacher,
     register_teacher,
@@ -63,14 +64,15 @@ st.set_page_config(
 
 
 @st.cache_resource
-def _initialize_database() -> bool:
-    init_db()
+def _initialize_schema() -> bool:
+    init_schema()
     return True
 
 
 def _bootstrap_db() -> None:
     try:
-        _initialize_database()
+        _initialize_schema()
+        ensure_migrations()
     except Exception as exc:
         from evaluar.db_backend import using_postgres
 

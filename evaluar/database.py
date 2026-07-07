@@ -87,11 +87,21 @@ CREATE TABLE IF NOT EXISTS submissions (
 """
 
 
-def init_db() -> None:
+def init_schema() -> None:
     with get_connection() as conn:
         conn.executescript(SCHEMA_SQL)
+
+
+def ensure_migrations() -> None:
+    """Aplica ALTER TABLE pendientes. Debe ejecutarse en cada arranque (no cachear)."""
+    with get_connection() as conn:
         _migrate_exams(conn)
         _migrate_submissions(conn)
+
+
+def init_db() -> None:
+    init_schema()
+    ensure_migrations()
 
 
 def _migrate_exams(conn: Any) -> None:
@@ -254,6 +264,7 @@ def create_exam(
     scoring_mode: str,
     questions: list[dict[str, Any]],
 ) -> str:
+    ensure_migrations()
     exam_id = generate_id()
     with get_connection() as conn:
         conn.execute(
@@ -303,6 +314,7 @@ def update_exam(
     scoring_mode: str,
     questions: list[dict[str, Any]],
 ) -> None:
+    ensure_migrations()
     with get_connection() as conn:
         row = conn.execute(
             "SELECT id FROM exams WHERE id = ? AND teacher_id = ?",
