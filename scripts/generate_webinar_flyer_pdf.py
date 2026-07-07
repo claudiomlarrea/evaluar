@@ -12,8 +12,8 @@ from reportlab.pdfgen import canvas
 
 ROOT = Path(__file__).resolve().parent.parent
 LOGO = ROOT / "assets" / "logo-observatorio-ia.png"
-OUTPUT = ROOT / "assets" / "flyer-webinar-evaluar-16julio-2026.pdf"
-DOCS_OUTPUT = Path.home() / "Documents" / "EvaluAR" / "flyer-webinar-evaluar-16julio-2026.pdf"
+OUTPUT = ROOT / "assets" / "flyer-webinar-evaluar-14julio-2026.pdf"
+DOCS_OUTPUT = Path.home() / "Documents" / "EvaluAR" / "flyer-webinar-evaluar-14julio-2026.pdf"
 
 # Formato compacto (no A4): ~12 × 18,8 cm
 PAGE_SIZE = (120 * mm, 188 * mm)
@@ -144,7 +144,7 @@ def build_pdf(output: Path = OUTPUT) -> Path:
 
     c.setFillColor(TEXT)
     c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(w / 2, h - header_h - date_h + 3.2 * mm, "Jueves 16 de julio · 18:00 – 19:00 hs")
+    c.drawCentredString(w / 2, h - header_h - date_h + 3.2 * mm, "Martes 14 de julio · 18:00 – 19:00 hs")
 
     y = h - header_h - date_h - 7 * mm
     c.setFillColor(TEXT)
