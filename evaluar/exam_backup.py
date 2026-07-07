@@ -47,6 +47,11 @@ def build_exam_backup(exam: dict[str, Any]) -> dict[str, Any]:
             "exam_date": exam.get("exam_date"),
             "exam_time": exam.get("exam_time"),
             "max_score": float(exam["max_score"]),
+            "pass_min_score": (
+                float(exam["pass_min_score"])
+                if exam.get("pass_min_score") is not None
+                else None
+            ),
             "show_detail_to_student": bool(exam.get("show_detail_to_student")),
             "scoring_mode": exam.get("scoring_mode") or "equal",
             "questions": [_normalize_question(q) for q in exam.get("questions", [])],
@@ -104,6 +109,11 @@ def parse_exam_backup(raw: bytes | str) -> dict[str, Any]:
         "exam_date": exam.get("exam_date"),
         "exam_time": exam.get("exam_time"),
         "max_score": float(exam.get("max_score") or 10),
+        "pass_min_score": (
+            float(exam["pass_min_score"])
+            if exam.get("pass_min_score") is not None
+            else None
+        ),
         "show_detail_to_student": bool(exam.get("show_detail_to_student", True)),
         "scoring_mode": scoring_mode,
         "questions": questions,

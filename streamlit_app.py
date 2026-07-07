@@ -40,7 +40,9 @@ from evaluar.utils import (
     format_exam_schedule,
     format_grading_summary,
     format_score,
+    default_pass_min_score,
     is_session_open,
+    passing_status,
     question_total_points,
     question_type_label,
 )
@@ -116,19 +118,27 @@ def _load_question_options(raw: str, qtype: str) -> tuple[list[str], list[dict[s
     return DEFAULT_MC, []
 
 
-def _submissions_dataframe(submissions: list[dict], max_score: float) -> pd.DataFrame:
+def _submissions_dataframe(
+    submissions: list[dict],
+    max_score: float,
+    pass_min_score: float | None = None,
+) -> pd.DataFrame:
     rows = []
     for s in submissions:
+        score = float(s["score"])
         row = {
             "Apellido y nombre": s["student_name"],
             "DNI / Matrícula": s["student_dni"],
-            "Nota (0-10)": s["score"],
+            f"Nota (0-{format_score(max_score)})": score,
             "Aciertos": s["correct_count"],
             "Errores": s["wrong_count"],
             "Sin responder": s["unanswered_count"],
             "Preguntas falladas": ", ".join(map(str, s["wrong_questions"])) or "—",
             "Fecha de envío": format_datetime(s["submitted_at"]),
         }
+        status = passing_status(score, pass_min_score)
+        if status is not None:
+            row["Estado"] = status
         if s.get("earned_points") is not None and s.get("total_points") is not None:
             row["Puntos obtenidos"] = s["earned_points"]
             row["Puntos del examen"] = s["total_points"]
@@ -869,6 +879,11 @@ def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
         "max_score": float(exam["max_score"]),
         "show_detail": bool(exam["show_detail_to_student"]),
         "scoring_mode": exam.get("scoring_mode") or "equal",
+        "pass_min_score": (
+            float(exam["pass_min_score"])
+            if exam.get("pass_min_score") is not None
+            else None
+        ),
     }
     _init_question_widgets_from_exam(exam["questions"])
     st.session_state.exam_wizard_step = "general"
@@ -983,6 +998,34 @@ def page_new_exam() -> None:
                 value=bool(preset.get("show_detail", True)),
             )
 
+        preset_max = float(preset.get("max_score", 10.0))
+        preset_has_pass = "pass_min_score" in preset and preset.get("pass_min_score") is not None
+        use_pass_min = st.checkbox(
+            "Definir nota mínima de aprobación",
+            value=preset_has_pass if preset else True,
+            help="Ej.: nota máxima 10 y aprobar con 6 (60% del puntaje total).",
+        )
+        pass_min_score = None
+        if use_pass_min:
+            default_pass = preset.get("pass_min_score")
+            if default_pass is None:
+                default_pass = default_pass_min_score(preset_max)
+            pass_min_score = st.number_input(
+                "Nota mínima para aprobar",
+                min_value=0.0,
+                max_value=float(max_score),
+                value=min(float(default_pass), float(max_score)),
+                step=0.5,
+            )
+            if pass_min_score > max_score:
+                st.error("La nota mínima no puede superar la nota máxima.")
+            else:
+                pct = (pass_min_score / max_score * 100) if max_score > 0 else 0
+                st.caption(
+                    f"Se considera **aprobado** con **{format_score(pass_min_score)}** o más "
+                    f"({pct:.0f}% de {format_score(max_score)})."
+                )
+
         scoring_options = {
             "Automático (1 punto por pregunta)": "equal",
             "Manual (definís el puntaje de cada pregunta)": "manual",
@@ -1026,6 +1069,8 @@ def page_new_exam() -> None:
                     st.error("Completá carrera, asignatura y año.")
                 elif not title.strip():
                     st.error("Completá el nombre del examen.")
+                elif use_pass_min and pass_min_score is not None and pass_min_score > max_score:
+                    st.error("La nota mínima de aprobación no puede ser mayor que la nota máxima.")
                 else:
                     previous_count = int(preset.get("question_count", 0))
                     st.session_state.exam_wizard_general = {
@@ -1038,6 +1083,7 @@ def page_new_exam() -> None:
                         "exam_time": exam_time.strftime("%H:%M"),
                         "question_count": int(question_count),
                         "max_score": float(max_score),
+                        "pass_min_score": float(pass_min_score) if use_pass_min and pass_min_score is not None else None,
                         "show_detail": show_detail,
                         "scoring_mode": scoring_mode,
                     }
@@ -1119,6 +1165,7 @@ def page_new_exam() -> None:
                             general.get("exam_date"),
                             general.get("exam_time"),
                             general["max_score"],
+                            general.get("pass_min_score"),
                             general["show_detail"],
                             general.get("scoring_mode", "equal"),
                             questions,
@@ -1136,6 +1183,7 @@ def page_new_exam() -> None:
                             general.get("exam_date"),
                             general.get("exam_time"),
                             general["max_score"],
+                            general.get("pass_min_score"),
                             general["show_detail"],
                             general.get("scoring_mode", "equal"),
                             questions,
@@ -1193,12 +1241,15 @@ def page_exam_detail() -> None:
         else "puntaje manual"
     )
     schedule = format_exam_schedule(exam.get("exam_date"), exam.get("exam_time"))
+    pass_note = ""
+    if exam.get("pass_min_score") is not None:
+        pass_note = f" · Aprueba con {format_score(float(exam['pass_min_score']))}+"
     st.caption(
         f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
         f"{('Año ' + exam['career_year']) if exam.get('career_year') else ''} · "
         f"{schedule + ' · ' if schedule else ''}"
         f"{len(exam['questions'])} preguntas · {format_score(exam_points)} pts totales · "
-        f"{scoring_label} · Nota 0-{exam['max_score']}"
+        f"{scoring_label} · Nota 0-{exam['max_score']}{pass_note}"
     )
     if exam.get("description"):
         st.info(exam["description"])
@@ -1362,20 +1413,38 @@ def page_session_results() -> None:
 
     st.subheader("Planilla de alumnos")
     exam_points = question_total_points(data["questions"])
+    pass_min = (
+        float(exam["pass_min_score"])
+        if exam.get("pass_min_score") is not None
+        else None
+    )
+    pass_caption = (
+        f" · Aprueba con {format_score(pass_min)}+"
+        if pass_min is not None
+        else ""
+    )
     st.caption(
         f"{exam.get('career') or ''} · {exam.get('subject') or ''} · "
         f"{exam['title']} · Sesión {session['code']} · "
-        f"{format_score(exam_points)} pts totales · Nota 0-{exam['max_score']}"
+        f"{format_score(exam_points)} pts totales · Nota 0-{exam['max_score']}{pass_caption}"
     )
 
     avg = 0 if not submissions else sum(s["score"] for s in submissions) / len(submissions)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Alumnos evaluados", len(submissions))
-    c2.metric("Promedio", format_score(avg))
-    c3.metric("Nota máxima", exam["max_score"])
+    if pass_min is not None and submissions:
+        approved = sum(1 for s in submissions if float(s["score"]) >= pass_min)
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Alumnos evaluados", len(submissions))
+        c2.metric("Aprobados", approved)
+        c3.metric("Promedio", format_score(avg))
+        c4.metric("Nota mínima", format_score(pass_min))
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Alumnos evaluados", len(submissions))
+        c2.metric("Promedio", format_score(avg))
+        c3.metric("Nota máxima", exam["max_score"])
 
     if submissions:
-        df = _submissions_dataframe(submissions, float(exam["max_score"]))
+        df = _submissions_dataframe(submissions, float(exam["max_score"]), pass_min)
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         st.warning(
@@ -1449,6 +1518,13 @@ def page_student() -> None:
         result = st.session_state.student_result
         st.success("Respuestas enviadas correctamente.")
         st.metric("Tu nota", f"{format_score(result['score'])} / {result['max_score']}")
+        pass_min = result.get("pass_min_score")
+        status = passing_status(float(result["score"]), pass_min)
+        if status is not None:
+            if status == "Aprobado":
+                st.success(f"Estado: **{status}** (nota mínima {format_score(float(pass_min))})")
+            else:
+                st.warning(f"Estado: **{status}** (nota mínima {format_score(float(pass_min))})")
         if result.get("earned_points") is not None and result.get("total_points") is not None:
             st.info(
                 format_grading_summary(

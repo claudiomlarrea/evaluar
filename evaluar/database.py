@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS exams (
     exam_date TEXT,
     exam_time TEXT,
     max_score REAL NOT NULL DEFAULT 10,
+    pass_min_score REAL,
     show_detail_to_student INTEGER NOT NULL DEFAULT 1,
     scoring_mode TEXT NOT NULL DEFAULT 'equal',
     created_at TEXT NOT NULL,
@@ -98,6 +99,7 @@ def _migrate_exams(conn: Any) -> None:
     if using_postgres():
         for column in columns:
             conn.execute(f"ALTER TABLE exams ADD COLUMN IF NOT EXISTS {column} TEXT")
+        conn.execute("ALTER TABLE exams ADD COLUMN IF NOT EXISTS pass_min_score REAL")
         conn.execute(
             "UPDATE exams SET scoring_mode = 'equal' WHERE scoring_mode IS NULL OR scoring_mode = ''"
         )
@@ -108,6 +110,8 @@ def _migrate_exams(conn: Any) -> None:
         if column not in existing:
             default = " DEFAULT 'equal'" if column == "scoring_mode" else ""
             conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT{default}")
+    if "pass_min_score" not in existing:
+        conn.execute("ALTER TABLE exams ADD COLUMN pass_min_score REAL")
     conn.execute(
         "UPDATE exams SET scoring_mode = 'equal' WHERE scoring_mode IS NULL OR scoring_mode = ''"
     )
@@ -245,6 +249,7 @@ def create_exam(
     exam_date: str | None,
     exam_time: str | None,
     max_score: float,
+    pass_min_score: float | None,
     show_detail_to_student: bool,
     scoring_mode: str,
     questions: list[dict[str, Any]],
@@ -255,10 +260,10 @@ def create_exam(
             """
             INSERT INTO exams (
                 id, teacher_id, title, course, career, subject, career_year,
-                description, exam_date, exam_time, max_score, show_detail_to_student,
-                scoring_mode, created_at
+                description, exam_date, exam_time, max_score, pass_min_score,
+                show_detail_to_student, scoring_mode, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 exam_id,
@@ -272,6 +277,7 @@ def create_exam(
                 exam_date,
                 exam_time,
                 max_score,
+                pass_min_score,
                 1 if show_detail_to_student else 0,
                 scoring_mode,
                 utc_now(),
@@ -292,6 +298,7 @@ def update_exam(
     exam_date: str | None,
     exam_time: str | None,
     max_score: float,
+    pass_min_score: float | None,
     show_detail_to_student: bool,
     scoring_mode: str,
     questions: list[dict[str, Any]],
@@ -309,7 +316,7 @@ def update_exam(
             UPDATE exams
             SET title = ?, course = ?, career = ?, subject = ?, career_year = ?,
                 description = ?, exam_date = ?, exam_time = ?, max_score = ?,
-                show_detail_to_student = ?, scoring_mode = ?
+                pass_min_score = ?, show_detail_to_student = ?, scoring_mode = ?
             WHERE id = ? AND teacher_id = ?
             """,
             (
@@ -322,6 +329,7 @@ def update_exam(
                 exam_date,
                 exam_time,
                 max_score,
+                pass_min_score,
                 1 if show_detail_to_student else 0,
                 scoring_mode,
                 exam_id,
@@ -366,6 +374,7 @@ def duplicate_exam(exam_id: str, teacher_id: str) -> str:
         exam.get("exam_date"),
         exam.get("exam_time"),
         float(exam["max_score"]),
+        float(exam["pass_min_score"]) if exam.get("pass_min_score") is not None else None,
         bool(exam["show_detail_to_student"]),
         exam.get("scoring_mode") or "equal",
         questions,
@@ -553,6 +562,11 @@ def submit_answers(
         "total_questions": len(questions),
         "show_detail": bool(exam["show_detail_to_student"]),
         "max_score": float(exam["max_score"]),
+        "pass_min_score": (
+            float(exam["pass_min_score"])
+            if exam.get("pass_min_score") is not None
+            else None
+        ),
     }
 
 

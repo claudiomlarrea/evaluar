@@ -67,6 +67,16 @@ def format_grading_summary(
     )
 
 
+def default_pass_min_score(max_score: float) -> float:
+    return round(float(max_score) * 0.6, 2)
+
+
+def passing_status(score: float, pass_min_score: float | None) -> str | None:
+    if pass_min_score is None:
+        return None
+    return "Aprobado" if float(score) >= float(pass_min_score) else "Desaprobado"
+
+
 def question_type_label(qtype: str) -> str:
     return {
         "MULTIPLE_CHOICE": "Opción múltiple",
