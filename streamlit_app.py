@@ -527,6 +527,26 @@ def _collect_student_answers(questions: list) -> dict[str, str]:
     return answers
 
 
+def _clear_question_widget_state() -> None:
+    """Limpia widgets temporales del asistente para no mezclar preguntas entre exámenes."""
+    keys_to_drop = [
+        key
+        for key in st.session_state.keys()
+        if key.startswith("q") and (
+            "_type_label" in key
+            or "_option_count" in key
+            or "_mc_answer" in key
+            or "_vf_answer" in key
+            or "_target_count" in key
+            or "_item_count" in key
+            or "_points" in key
+            or "_match_" in key
+        )
+    ]
+    for key in keys_to_drop:
+        st.session_state.pop(key, None)
+
+
 def _logo_base64() -> str:
     if LOGO_PATH.is_file():
         return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
@@ -583,6 +603,7 @@ def render_sidebar() -> None:
             st.session_state.page = "panel"
             st.rerun()
         if st.sidebar.button("Nuevo examen", use_container_width=True):
+            _reset_exam_wizard()
             st.session_state.page = "new_exam"
             st.rerun()
         if st.sidebar.button("Cerrar sesión", use_container_width=True):
@@ -698,6 +719,7 @@ def page_panel() -> None:
     _render_local_backup_notice()
 
     if st.button("➕ Nuevo examen"):
+        _reset_exam_wizard()
         st.session_state.page = "new_exam"
         st.rerun()
 
@@ -981,6 +1003,7 @@ def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
     exam = get_exam(exam_id, teacher_id)
     if not exam:
         return
+    _clear_question_widget_state()
     st.session_state.exam_wizard_mode = "edit"
     st.session_state.edit_exam_id = exam_id
     st.session_state.exam_wizard_general = {
@@ -1012,6 +1035,7 @@ def _reset_exam_wizard() -> None:
     st.session_state.exam_wizard_page = 1
     st.session_state.exam_wizard_mode = "create"
     st.session_state.edit_exam_id = None
+    _clear_question_widget_state()
 
 
 def _init_question_widgets(question_count: int) -> None:
@@ -1095,11 +1119,13 @@ def page_new_exam() -> None:
 
         col4, col5, col6 = st.columns(3)
         with col4:
+            wizard_key = st.session_state.get("edit_exam_id") if editing else "create"
             question_count = st.number_input(
                 "Cantidad total de preguntas *",
                 min_value=1,
                 max_value=200,
                 value=int(preset.get("question_count", 50)),
+                key=f"wizard_{wizard_key}_question_count",
             )
         with col5:
             max_score = st.number_input(
@@ -1156,6 +1182,7 @@ def page_new_exam() -> None:
                 "La nota final siempre va de 0 a la nota máxima. "
                 "El sistema calcula: (puntos obtenidos ÷ puntos totales del examen) × nota máxima."
             ),
+            key=f"wizard_{st.session_state.get('edit_exam_id') if editing else 'create'}_scoring_label",
         )
         scoring_mode = scoring_options[scoring_label]
         if scoring_mode == "equal":
