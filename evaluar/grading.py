@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from evaluar.utils import round_grade
+
 
 def normalize_answer(value: str) -> str:
     return value.strip().upper()
@@ -105,7 +107,7 @@ def grade_submission(
             incorrect_questions.append(order)
             wrong_questions.append(order)
 
-    score = 0.0 if total_points == 0 else round((earned_points / total_points) * max_score, 2)
+    score = 0 if total_points == 0 else round_grade((earned_points / total_points) * max_score)
 
     return {
         "score": score,

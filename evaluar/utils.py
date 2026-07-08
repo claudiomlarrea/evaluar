@@ -22,8 +22,21 @@ def utc_now() -> str:
 
 
 def format_score(score: float) -> str:
+    """Formatea puntos o notas; sin decimales si el valor es entero."""
+    rounded = round(float(score))
+    if abs(float(score) - rounded) < 1e-9:
+        return str(int(rounded))
     text = f"{score:.2f}"
     return text[:-3] if text.endswith(".00") else text
+
+
+def round_grade(score: float) -> int:
+    """Nota final del alumno, siempre entera."""
+    return int(round(float(score)))
+
+
+def format_grade(score: float) -> str:
+    return str(round_grade(score))
 
 
 def format_datetime(value: str | None) -> str:
@@ -59,11 +72,11 @@ def format_grading_summary(
     score: float | None = None,
 ) -> str:
     final = score if score is not None else (
-        0.0 if total_points == 0 else round((earned_points / total_points) * max_score, 2)
+        0.0 if total_points == 0 else round((earned_points / total_points) * max_score)
     )
     return (
         f"{format_score(earned_points)} / {format_score(total_points)} pts · "
-        f"Nota {format_score(final)} / {format_score(max_score)}"
+        f"Nota {format_grade(final)} / {format_grade(max_score)}"
     )
 
 

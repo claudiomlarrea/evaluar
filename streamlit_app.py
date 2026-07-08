@@ -48,6 +48,7 @@ from evaluar.utils import (
     format_datetime,
     format_exam_schedule,
     format_grading_summary,
+    format_grade,
     format_score,
     default_pass_min_score,
     is_session_open,
@@ -139,7 +140,7 @@ def _submissions_dataframe(
         row = {
             "Apellido y nombre": s["student_name"],
             "DNI / Matrícula": s["student_dni"],
-            f"Nota (0-{format_score(max_score)})": score,
+            f"Nota (0-{format_grade(max_score)})": round(float(score)),
             "Aciertos": s["correct_count"],
             "Errores": s["wrong_count"],
             "Sin responder": s["unanswered_count"],
@@ -1679,12 +1680,12 @@ def page_session_results() -> None:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Alumnos evaluados", len(submissions))
         c2.metric("Aprobados", approved)
-        c3.metric("Promedio", format_score(avg))
-        c4.metric("Nota mínima", format_score(pass_min))
+        c3.metric("Promedio", format_grade(avg))
+        c4.metric("Nota mínima", format_grade(pass_min))
     else:
         c1, c2, c3 = st.columns(3)
         c1.metric("Alumnos evaluados", len(submissions))
-        c2.metric("Promedio", format_score(avg))
+        c2.metric("Promedio", format_grade(avg))
         c3.metric("Nota máxima", exam["max_score"])
 
     if submissions:
@@ -1774,7 +1775,7 @@ def page_student() -> None:
     if st.session_state.student_result:
         result = st.session_state.student_result
         st.success("Respuestas enviadas correctamente.")
-        st.metric("Tu nota", f"{format_score(result['score'])} / {result['max_score']}")
+        st.metric("Tu nota", f"{format_grade(result['score'])} / {format_grade(result['max_score'])}")
         pass_min = result.get("pass_min_score")
         status = passing_status(float(result["score"]), pass_min)
         if status is not None:
