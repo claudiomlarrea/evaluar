@@ -20,6 +20,7 @@ from evaluar.database import (
     create_exam,
     create_session,
     duplicate_exam,
+    delete_exam,
     delete_session,
     ensure_migrations,
     get_exam,
@@ -656,7 +657,7 @@ def page_panel() -> None:
                     f"{schedule + ' · ' if schedule else ''}"
                     f"Nota máxima {exam['max_score']} · {exam['session_count']} códigos"
                 )
-                col_a, col_b, col_c = st.columns(3)
+                col_a, col_b, col_c, col_d = st.columns(4)
                 with col_a:
                     if st.button("Administrar", key=f"exam_{exam['id']}", use_container_width=True):
                         st.session_state.exam_id = exam["id"]
@@ -677,12 +678,67 @@ def page_panel() -> None:
                             st.rerun()
                         except Exception as exc:
                             st.error(f"No se pudo duplicar: {exc}")
+                with col_d:
+                    if st.button("Eliminar", key=f"del_exam_{exam['id']}", use_container_width=True):
+                        st.session_state[f"confirm_delete_exam_{exam['id']}"] = True
                 full_exam = get_exam(exam["id"], st.session_state.teacher["id"])
                 if full_exam:
                     _render_exam_backup_download(
                         full_exam,
                         label="Guardar examen en mi computadora (.json)",
                     )
+                if st.session_state.get(f"confirm_delete_exam_{exam['id']}"):
+                    st.warning(
+                        "Se eliminará este examen, sus códigos y las respuestas de alumnos. "
+                        "Descargá el `.json` y la planilla antes si los necesitás."
+                    )
+                    confirm = st.text_input(
+                        "Escribí ELIMINAR para confirmar",
+                        key=f"delete_exam_confirm_{exam['id']}",
+                    )
+                    c_ok, c_cancel = st.columns(2)
+                    with c_ok:
+                        if st.button(
+                            "Confirmar eliminación",
+                            type="primary",
+                            use_container_width=True,
+                            key=f"delete_exam_ok_{exam['id']}",
+                        ):
+                            if confirm.strip().upper() != "ELIMINAR":
+                                st.error("Escribí ELIMINAR para confirmar.")
+                            else:
+                                with st.spinner("Eliminando examen..."):
+                                    try:
+                                        deleted = delete_exam(
+                                            exam["id"],
+                                            st.session_state.teacher["id"],
+                                        )
+                                    except Exception as exc:
+                                        st.error(f"No se pudo eliminar el examen: {exc}")
+                                        deleted = None
+                                if deleted:
+                                    if st.session_state.get("exam_id") == exam["id"]:
+                                        st.session_state.exam_id = None
+                                        st.session_state.session_id = None
+                                    st.session_state.pop(
+                                        f"confirm_delete_exam_{exam['id']}", None
+                                    )
+                                    st.session_state.pop(
+                                        f"delete_exam_confirm_{exam['id']}", None
+                                    )
+                                    st.success(f"Examen «{deleted['title']}» eliminado.")
+                                    st.rerun()
+                                elif deleted is not None:
+                                    st.error("No se pudo eliminar el examen.")
+                    with c_cancel:
+                        if st.button(
+                            "Cancelar",
+                            use_container_width=True,
+                            key=f"delete_exam_cancel_{exam['id']}",
+                        ):
+                            st.session_state.pop(f"confirm_delete_exam_{exam['id']}", None)
+                            st.session_state.pop(f"delete_exam_confirm_{exam['id']}", None)
+                            st.rerun()
 
     with st.expander("Restaurar examen desde tu computadora"):
         st.caption(

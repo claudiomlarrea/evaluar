@@ -485,6 +485,40 @@ def delete_session(session_id: str, teacher_id: str) -> dict[str, Any] | None:
     return session
 
 
+def delete_exam(exam_id: str, teacher_id: str) -> dict[str, Any] | None:
+    """Elimina un examen del docente, con sus preguntas, códigos y respuestas."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT e.id, e.title,
+                   (SELECT COUNT(*) FROM sessions s WHERE s.exam_id = e.id) AS session_count,
+                   (SELECT COUNT(*) FROM submissions sub
+                    JOIN sessions s ON s.id = sub.session_id
+                    WHERE s.exam_id = e.id) AS submission_count
+            FROM exams e
+            WHERE e.id = ? AND e.teacher_id = ?
+            """,
+            (exam_id, teacher_id),
+        ).fetchone()
+        if not row:
+            return None
+        exam = row_to_dict(row) or {}
+        conn.execute(
+            """
+            DELETE FROM submissions
+            WHERE session_id IN (SELECT id FROM sessions WHERE exam_id = ?)
+            """,
+            (exam_id,),
+        )
+        conn.execute("DELETE FROM sessions WHERE exam_id = ?", (exam_id,))
+        conn.execute("DELETE FROM questions WHERE exam_id = ?", (exam_id,))
+        conn.execute(
+            "DELETE FROM exams WHERE id = ? AND teacher_id = ?",
+            (exam_id, teacher_id),
+        )
+    return exam
+
+
 def get_session_by_code(code: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         session = conn.execute(
