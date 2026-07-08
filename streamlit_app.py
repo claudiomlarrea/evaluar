@@ -36,7 +36,14 @@ from evaluar.database import (
 )
 from evaluar.answer_parser import letters_for_count
 from evaluar.exam_backup import exam_backup_bytes, exam_backup_filename, parse_exam_backup
-from evaluar.question_builder import TYPE_CHOICES, TYPE_LABELS, build_all_questions, default_question_draft
+from evaluar.question_builder import (
+    TYPE_CHOICES,
+    TYPE_LABELS,
+    build_all_questions,
+    default_question_draft,
+    drafts_from_exam_questions,
+    item_labels,
+)
 from evaluar.utils import (
     format_datetime,
     format_exam_schedule,
@@ -459,6 +466,9 @@ def ensure_state() -> None:
         "exam_wizard_step": "general",
         "exam_wizard_general": {},
         "exam_wizard_drafts": [],
+        "exam_question_drafts": None,
+        "exam_questions_source_id": None,
+        "exam_wizard_last_page": None,
         "exam_wizard_page": 1,
         "last_created_session_code": None,
         "flash_session_code": None,
@@ -607,6 +617,7 @@ def render_sidebar() -> None:
             st.session_state.page = "new_exam"
             st.rerun()
         if st.sidebar.button("Cerrar sesión", use_container_width=True):
+            _reset_exam_wizard()
             st.session_state.teacher = None
             st.session_state.page = "home"
             st.rerun()
@@ -889,7 +900,6 @@ def _render_question_editor(question_number: int) -> None:
         option_count = st.selectbox(
             "Cantidad de opciones (distractores)",
             [3, 4, 5, 6],
-            index=2,
             key=f"q{question_number}_option_count",
         )
         options = letters_for_count(int(option_count))
@@ -914,14 +924,12 @@ def _render_question_editor(question_number: int) -> None:
             target_count = st.selectbox(
                 "Cantidad de opciones destino",
                 [3, 4, 5, 6],
-                index=3,
                 key=f"q{question_number}_target_count",
             )
         with col2:
             item_count = st.selectbox(
                 "Cantidad de ítems a emparejar",
                 [3, 4, 5, 6],
-                index=0,
                 key=f"q{question_number}_item_count",
             )
 
@@ -970,40 +978,109 @@ def _collect_question_draft(question_number: int) -> dict:
     return draft
 
 
-def _init_question_widgets_from_exam(questions: list[dict]) -> None:
-    for question in questions:
-        number = int(question["order"])
-        qtype = question["type"]
-        st.session_state[f"q{number}_type_label"] = TYPE_LABELS.get(qtype, "Opción múltiple")
+def _sync_draft_to_widgets(question_number: int, draft: dict) -> None:
+    """Carga un borrador guardado en los widgets de una pregunta."""
+    st.session_state[f"q{question_number}_type_label"] = TYPE_LABELS.get(
+        draft["type"], "Opción múltiple"
+    )
+    st.session_state[f"q{question_number}_points"] = float(draft.get("points", 1))
+    if draft["type"] == "MULTIPLE_CHOICE":
+        st.session_state[f"q{question_number}_option_count"] = int(draft.get("option_count", 5))
+        st.session_state[f"q{question_number}_mc_answer"] = str(draft.get("mc_answer", "A"))
+    elif draft["type"] == "TRUE_FALSE":
+        st.session_state[f"q{question_number}_vf_answer"] = str(draft.get("vf_answer", "V"))
+    elif draft["type"] == "MATCHING":
+        item_count = int(draft.get("item_count", 3))
+        st.session_state[f"q{question_number}_target_count"] = int(draft.get("target_count", 6))
+        st.session_state[f"q{question_number}_item_count"] = item_count
+        answers = draft.get("matching_answers") or {}
+        for label in item_labels(item_count):
+            st.session_state[f"q{question_number}_match_{label}"] = answers.get(label, "A")
 
-        options_raw = question.get("options")
-        if isinstance(options_raw, str):
-            options_raw = json.loads(options_raw)
 
-        if qtype == "MULTIPLE_CHOICE":
-            options = options_raw if isinstance(options_raw, list) else []
-            st.session_state[f"q{number}_option_count"] = len(options) or 5
-            st.session_state[f"q{number}_mc_answer"] = question["correct_answer"]
-        elif qtype == "TRUE_FALSE":
-            st.session_state[f"q{number}_vf_answer"] = question["correct_answer"]
-        elif qtype == "MATCHING":
-            targets = options_raw.get("targets", []) if isinstance(options_raw, dict) else []
-            items = options_raw.get("items", []) if isinstance(options_raw, dict) else []
-            st.session_state[f"q{number}_target_count"] = len(targets) or 6
-            st.session_state[f"q{number}_item_count"] = len(items) or 3
-            correct = question.get("correct_answer")
-            if isinstance(correct, str):
-                correct = json.loads(correct)
-            for label in [item["left"] for item in items]:
-                st.session_state[f"q{number}_match_{label}"] = (correct or {}).get(label, "A")
-        st.session_state[f"q{number}_points"] = float(question.get("points") or 1)
+def _sync_widgets_to_draft(question_number: int) -> None:
+    """Guarda los widgets visibles de una pregunta en el borrador maestro."""
+    if f"q{question_number}_type_label" not in st.session_state:
+        return
+    draft = _collect_question_draft(question_number)
+    drafts = st.session_state.exam_question_drafts
+    if drafts is None:
+        drafts = []
+        st.session_state.exam_question_drafts = drafts
+    while len(drafts) < question_number:
+        drafts.append(default_question_draft(len(drafts) + 1))
+    drafts[question_number - 1] = draft
+
+
+def _flush_question_page_to_drafts(start: int, end: int) -> None:
+    for number in range(start, end + 1):
+        _sync_widgets_to_draft(number)
+
+
+def _ensure_exam_question_drafts(question_count: int) -> None:
+    drafts = st.session_state.get("exam_question_drafts")
+    if not drafts:
+        st.session_state.exam_question_drafts = [
+            default_question_draft(number) for number in range(1, question_count + 1)
+        ]
+        return
+    while len(drafts) < question_count:
+        drafts.append(default_question_draft(len(drafts) + 1))
+    if len(drafts) > question_count:
+        st.session_state.exam_question_drafts = drafts[:question_count]
+
+
+def _load_exam_drafts_from_db(exam_id: str, teacher_id: str) -> bool:
+    exam = get_exam(exam_id, teacher_id)
+    if not exam:
+        return False
+    _clear_question_widget_state()
+    st.session_state.exam_question_drafts = drafts_from_exam_questions(exam["questions"])
+    st.session_state.exam_questions_source_id = exam_id
+    st.session_state.exam_wizard_last_page = None
+    return True
+
+
+def _prepare_question_page(question_count: int, current_page: int) -> tuple[int, int]:
+    """Sincroniza borradores ↔ widgets al cambiar de página del asistente."""
+    _ensure_exam_question_drafts(question_count)
+    page_size = QUESTIONS_PER_PAGE
+    total_pages = max(1, (question_count + page_size - 1) // page_size)
+    current_page = max(1, min(current_page, total_pages))
+    start = (current_page - 1) * page_size + 1
+    end = min(question_count, start + page_size - 1)
+
+    last_page = st.session_state.get("exam_wizard_last_page")
+    if last_page is not None and last_page != current_page:
+        prev_start = (last_page - 1) * page_size + 1
+        prev_end = min(question_count, prev_start + page_size - 1)
+        _flush_question_page_to_drafts(prev_start, prev_end)
+
+    if last_page != current_page:
+        drafts = st.session_state.exam_question_drafts or []
+        for number in range(start, end + 1):
+            if number <= len(drafts):
+                _sync_draft_to_widgets(number, drafts[number - 1])
+        st.session_state.exam_wizard_last_page = current_page
+
+    return start, end
+
+
+def _collect_all_question_drafts(question_count: int, start: int, end: int) -> list[dict]:
+    _flush_question_page_to_drafts(start, end)
+    drafts = st.session_state.exam_question_drafts or []
+    if len(drafts) < question_count:
+        _ensure_exam_question_drafts(question_count)
+        drafts = st.session_state.exam_question_drafts or []
+    return drafts[:question_count]
 
 
 def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
+    if not _load_exam_drafts_from_db(exam_id, teacher_id):
+        return
     exam = get_exam(exam_id, teacher_id)
     if not exam:
         return
-    _clear_question_widget_state()
     st.session_state.exam_wizard_mode = "edit"
     st.session_state.edit_exam_id = exam_id
     st.session_state.exam_wizard_general = {
@@ -1024,7 +1101,6 @@ def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
             else None
         ),
     }
-    _init_question_widgets_from_exam(exam["questions"])
     st.session_state.exam_wizard_step = "general"
     st.session_state.exam_wizard_page = 1
 
@@ -1035,22 +1111,10 @@ def _reset_exam_wizard() -> None:
     st.session_state.exam_wizard_page = 1
     st.session_state.exam_wizard_mode = "create"
     st.session_state.edit_exam_id = None
+    st.session_state.exam_question_drafts = None
+    st.session_state.exam_questions_source_id = None
+    st.session_state.exam_wizard_last_page = None
     _clear_question_widget_state()
-
-
-def _init_question_widgets(question_count: int) -> None:
-    for number in range(1, question_count + 1):
-        if f"q{number}_type_label" not in st.session_state:
-            defaults = default_question_draft(number)
-            st.session_state[f"q{number}_type_label"] = "Opción múltiple"
-            st.session_state[f"q{number}_option_count"] = defaults["option_count"]
-            st.session_state[f"q{number}_mc_answer"] = defaults["mc_answer"]
-            st.session_state[f"q{number}_vf_answer"] = defaults["vf_answer"]
-            st.session_state[f"q{number}_target_count"] = defaults["target_count"]
-            st.session_state[f"q{number}_item_count"] = defaults["item_count"]
-            st.session_state[f"q{number}_points"] = defaults["points"]
-            for label in defaults["matching_items"]:
-                st.session_state[f"q{number}_match_{label}"] = defaults["matching_answers"][label]
 
 
 def page_new_exam() -> None:
@@ -1231,10 +1295,30 @@ def page_new_exam() -> None:
                         "show_detail": show_detail,
                         "scoring_mode": scoring_mode,
                     }
-                    if int(question_count) != previous_count:
-                        _init_question_widgets(int(question_count))
+                    if editing:
+                        if (
+                            st.session_state.get("exam_questions_source_id")
+                            != st.session_state.edit_exam_id
+                        ):
+                            _load_exam_drafts_from_db(
+                                st.session_state.edit_exam_id,
+                                st.session_state.teacher["id"],
+                            )
+                        drafts = list(st.session_state.exam_question_drafts or [])
+                        if int(question_count) > len(drafts):
+                            while len(drafts) < int(question_count):
+                                drafts.append(default_question_draft(len(drafts) + 1))
+                        elif int(question_count) < len(drafts):
+                            drafts = drafts[: int(question_count)]
+                        st.session_state.exam_question_drafts = drafts
+                    else:
+                        if int(question_count) != previous_count:
+                            _ensure_exam_question_drafts(int(question_count))
+                        elif not st.session_state.get("exam_question_drafts"):
+                            _ensure_exam_question_drafts(int(question_count))
                     st.session_state.exam_wizard_step = "questions"
                     st.session_state.exam_wizard_page = 1
+                    st.session_state.exam_wizard_last_page = None
                     st.rerun()
 
     else:
@@ -1244,14 +1328,25 @@ def page_new_exam() -> None:
             st.rerun()
             return
 
+        if (
+            editing
+            and st.session_state.get("exam_questions_source_id")
+            != st.session_state.get("edit_exam_id")
+        ):
+            _load_exam_drafts_from_db(
+                st.session_state.edit_exam_id,
+                st.session_state.teacher["id"],
+            )
+
         question_count = int(general["question_count"])
         total_pages = max(1, (question_count + QUESTIONS_PER_PAGE - 1) // QUESTIONS_PER_PAGE)
         current_page = int(st.session_state.exam_wizard_page)
         current_page = max(1, min(current_page, total_pages))
+        start, end = _prepare_question_page(question_count, current_page)
 
         st.markdown("### 2. Clave de respuestas — pregunta por pregunta")
         try:
-            preview_drafts = [_collect_question_draft(number) for number in range(1, question_count + 1)]
+            preview_drafts = _collect_all_question_drafts(question_count, start, end)
             preview_total = question_total_points(build_all_questions(preview_drafts))
         except ValueError:
             preview_total = float(question_count)
@@ -1269,8 +1364,6 @@ def page_new_exam() -> None:
             f"{'1 pt/pregunta' if general.get('scoring_mode') == 'equal' else 'puntaje manual'}"
         )
 
-        start = (current_page - 1) * QUESTIONS_PER_PAGE + 1
-        end = min(question_count, start + QUESTIONS_PER_PAGE - 1)
         st.progress(min(current_page / total_pages, 1.0))
         st.write(f"Configurando preguntas **{start}** a **{end}** de **{question_count}**")
 
@@ -1281,21 +1374,25 @@ def page_new_exam() -> None:
         nav1, nav2, nav3, nav4 = st.columns(4)
         with nav1:
             if st.button("← Datos generales"):
+                _flush_question_page_to_drafts(start, end)
                 st.session_state.exam_wizard_step = "general"
+                st.session_state.exam_wizard_last_page = None
                 st.rerun()
         with nav2:
             if current_page > 1 and st.button("← Página anterior"):
+                _flush_question_page_to_drafts(start, end)
                 st.session_state.exam_wizard_page = current_page - 1
                 st.rerun()
         with nav3:
             if current_page < total_pages and st.button("Página siguiente →"):
+                _flush_question_page_to_drafts(start, end)
                 st.session_state.exam_wizard_page = current_page + 1
                 st.rerun()
         with nav4:
             save_label = "Guardar cambios" if editing else "Crear examen"
             if st.button(save_label, type="primary"):
                 try:
-                    drafts = [_collect_question_draft(number) for number in range(1, question_count + 1)]
+                    drafts = _collect_all_question_drafts(question_count, start, end)
                     questions = build_all_questions(drafts)
                     if editing:
                         update_exam(

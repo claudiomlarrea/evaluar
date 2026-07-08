@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from evaluar.answer_parser import letters_for_count
@@ -104,3 +105,68 @@ def build_question(draft: dict[str, Any]) -> dict[str, Any]:
 
 def build_all_questions(drafts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [build_question(draft) for draft in drafts]
+
+
+def _parse_json_field(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+def question_row_to_draft(question: dict[str, Any]) -> dict[str, Any]:
+    """Convierte una fila de la base al formato del asistente docente."""
+    order = int(question["order"])
+    qtype = question["type"]
+    draft: dict[str, Any] = {
+        "order": order,
+        "type": qtype,
+        "points": float(question.get("points") or 1),
+    }
+    options_raw = _parse_json_field(question.get("options"), [])
+    correct = question.get("correct_answer")
+    if qtype == "MATCHING":
+        correct = _parse_json_field(correct, {})
+    else:
+        correct = str(correct or "").strip().upper()
+
+    if qtype == "MULTIPLE_CHOICE":
+        options = options_raw if isinstance(options_raw, list) else []
+        draft["option_count"] = len(options) or 5
+        draft["mc_answer"] = correct or "A"
+    elif qtype == "TRUE_FALSE":
+        draft["vf_answer"] = correct if correct in {"V", "F"} else "V"
+    elif qtype == "MATCHING":
+        opts = options_raw if isinstance(options_raw, dict) else {}
+        targets = opts.get("targets", [])
+        items = opts.get("items", [])
+        draft["target_count"] = len(targets) or 6
+        draft["item_count"] = len(items) or 3
+        labels = [
+            str(item.get("left", "")).lower()
+            for item in items
+            if item.get("left")
+        ]
+        if not labels:
+            labels = item_labels(draft["item_count"])
+        correct_map = correct if isinstance(correct, dict) else {}
+        draft["matching_answers"] = {
+            label: str(
+                correct_map.get(label)
+                or correct_map.get(label.upper())
+                or "A"
+            ).upper()
+            for label in labels
+        }
+    return draft
+
+
+def drafts_from_exam_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        question_row_to_draft(question)
+        for question in sorted(questions, key=lambda row: int(row["order"]))
+    ]
