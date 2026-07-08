@@ -462,6 +462,7 @@ def ensure_state() -> None:
         "student_exam_payload": None,
         "student_name": "",
         "student_dni": "",
+        "student_page_num": 1,
         "answer_key_draft": "",
         "exam_wizard_step": "general",
         "exam_wizard_general": {},
@@ -636,6 +637,7 @@ def render_sidebar() -> None:
         st.session_state.student_step = "identify"
         st.session_state.student_result = None
         st.session_state.student_exam_payload = None
+        st.session_state.student_page_num = 1
         st.rerun()
 
     st.sidebar.divider()
@@ -683,6 +685,7 @@ def page_home() -> None:
             st.session_state.student_step = "identify"
             st.session_state.student_result = None
             st.session_state.student_exam_payload = None
+            st.session_state.student_page_num = 1
             st.rerun()
 
 
@@ -1830,18 +1833,38 @@ def page_student() -> None:
                 st.session_state.student_name = name.strip()
                 st.session_state.student_dni = dni.strip()
                 st.session_state.student_step = "answers"
+                st.session_state.student_page_num = 1
+                st.session_state.student_exam_payload = None
                 st.rerun()
         return
 
     st.markdown("Marcá la opción que elegiste en tu cuadernillo de papel.")
-    st.caption(
-        "Si la página dice *Connecting*, esperá o recargá: tus marcas en esta pestaña se conservan."
-    )
     page_size = 10
     total_pages = max(1, (len(questions) + page_size - 1) // page_size)
-    page_num = st.number_input("Página", min_value=1, max_value=total_pages, value=1)
-    start_idx = (page_num - 1) * page_size
+    current_page = int(st.session_state.get("student_page_num", 1))
+    current_page = max(1, min(current_page, total_pages))
+    st.session_state.student_page_num = current_page
+    start_idx = (current_page - 1) * page_size
     visible = questions[start_idx : start_idx + page_size]
+    first_q = visible[0]["order"] if visible else 1
+    last_q = visible[-1]["order"] if visible else len(questions)
+
+    st.info(
+        f"Página **{current_page}** de **{total_pages}** · "
+        f"Preguntas **{first_q}** a **{last_q}** de **{len(questions)}**"
+    )
+
+    nav_prev, nav_next = st.columns(2)
+    with nav_prev:
+        if current_page > 1 and st.button("← Página anterior", use_container_width=True):
+            st.session_state.student_page_num = current_page - 1
+            st.rerun()
+    with nav_next:
+        if current_page < total_pages and st.button(
+            "Página siguiente →", use_container_width=True, type="primary"
+        ):
+            st.session_state.student_page_num = current_page + 1
+            st.rerun()
 
     for question in visible:
         order = question["order"]
@@ -1870,22 +1893,42 @@ def page_student() -> None:
                     key=f"ans_{order}_{left_key}",
                 )
 
-    if page_num == total_pages and st.button("Enviar respuestas", type="primary"):
-        answers = _collect_student_answers(questions)
-        try:
-            result = submit_answers(
-                code,
-                st.session_state.student_name,
-                st.session_state.student_dni,
-                answers,
-            )
-            st.session_state.student_result = result
+    st.divider()
+    nav_prev2, nav_next2, nav_send = st.columns([1, 1, 1])
+    with nav_prev2:
+        if current_page > 1 and st.button(
+            "← Anterior", use_container_width=True, key="student_prev_bottom"
+        ):
+            st.session_state.student_page_num = current_page - 1
             st.rerun()
-        except ValueError as exc:
-            st.error(str(exc))
-        except Exception as exc:
-            st.error(f"No se pudieron enviar las respuestas: {exc}")
-            st.info("Si ves *Connecting*, esperá a que vuelva la conexión y volvé a enviar.")
+    with nav_next2:
+        if current_page < total_pages and st.button(
+            "Siguiente →",
+            use_container_width=True,
+            type="primary",
+            key="student_next_bottom",
+        ):
+            st.session_state.student_page_num = current_page + 1
+            st.rerun()
+    with nav_send:
+        if current_page == total_pages and st.button(
+            "Enviar respuestas", type="primary", use_container_width=True
+        ):
+            answers = _collect_student_answers(questions)
+            try:
+                result = submit_answers(
+                    code,
+                    st.session_state.student_name,
+                    st.session_state.student_dni,
+                    answers,
+                )
+                st.session_state.student_result = result
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"No se pudieron enviar las respuestas: {exc}")
+                st.info("Si ves *Connecting*, esperá a que vuelva la conexión y volvé a enviar.")
 
 
 def main() -> None:
