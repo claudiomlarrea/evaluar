@@ -49,7 +49,7 @@ from evaluar.utils import (
     question_type_label,
 )
 
-QUESTIONS_PER_PAGE = 5
+QUESTIONS_PER_PAGE = 10
 ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
@@ -1189,7 +1189,7 @@ def page_new_exam() -> None:
         st.write(f"Configurando preguntas **{start}** a **{end}** de **{question_count}**")
 
         for number in range(start, end + 1):
-            with st.expander(f"Pregunta {number}", expanded=True):
+            with st.expander(f"Pregunta {number}", expanded=False):
                 _render_question_editor(number)
 
         nav1, nav2, nav3, nav4 = st.columns(4)
