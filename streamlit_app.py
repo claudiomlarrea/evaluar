@@ -1052,8 +1052,9 @@ def page_new_exam() -> None:
             )
         with col6:
             show_detail = st.checkbox(
-                "Mostrar preguntas falladas al alumno",
+                "Mostrar al alumno el número de preguntas falladas",
                 value=bool(preset.get("show_detail", True)),
+                help="Si está activo, después de enviar verá qué números falló u omitió.",
             )
 
         preset_max = float(preset.get("max_score", 10.0))
@@ -1596,8 +1597,32 @@ def page_student() -> None:
         c1.metric("Aciertos", result["correct_count"])
         c2.metric("Errores", result["wrong_count"])
         c3.metric("Sin responder", result["unanswered_count"])
-        if result["show_detail"] and result["wrong_questions"]:
-            st.warning("Preguntas incorrectas u omitidas: " + ", ".join(map(str, result["wrong_questions"])))
+        if result.get("show_detail", True):
+            incorrect_nums = result.get("incorrect_questions")
+            unanswered_nums = result.get("unanswered_questions")
+            if incorrect_nums is None and unanswered_nums is None:
+                combined = result.get("wrong_questions") or []
+                if combined:
+                    st.warning(
+                        "Preguntas incorrectas u omitidas: **"
+                        + ", ".join(map(str, combined))
+                        + "**"
+                    )
+            else:
+                if incorrect_nums:
+                    st.error(
+                        "Preguntas respondidas mal: **"
+                        + ", ".join(map(str, incorrect_nums))
+                        + "**"
+                    )
+                if unanswered_nums:
+                    st.warning(
+                        "Preguntas sin responder: **"
+                        + ", ".join(map(str, unanswered_nums))
+                        + "**"
+                    )
+                if not incorrect_nums and not unanswered_nums:
+                    st.success("Todas las preguntas respondidas correctamente.")
         return
 
     if st.session_state.student_step == "identify":

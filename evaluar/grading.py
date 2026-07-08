@@ -82,15 +82,19 @@ def grade_submission(
     wrong_count = 0
     unanswered_count = 0
     wrong_questions: list[int] = []
+    incorrect_questions: list[int] = []
+    unanswered_questions: list[int] = []
 
     for question in questions:
         parsed = parse_question(question) if "correct_answer" in question else question
         total_points += float(parsed["points"])
         student_answer = answers.get(str(parsed["order"]), "").strip()
+        order = int(parsed["order"])
 
         if not student_answer:
             unanswered_count += 1
-            wrong_questions.append(int(parsed["order"]))
+            unanswered_questions.append(order)
+            wrong_questions.append(order)
             continue
 
         if answers_match(student_answer, parsed["correct_answer"], parsed["type"]):
@@ -98,7 +102,8 @@ def grade_submission(
             earned_points += float(parsed["points"])
         else:
             wrong_count += 1
-            wrong_questions.append(int(parsed["order"]))
+            incorrect_questions.append(order)
+            wrong_questions.append(order)
 
     score = 0.0 if total_points == 0 else round((earned_points / total_points) * max_score, 2)
 
@@ -108,6 +113,8 @@ def grade_submission(
         "wrong_count": wrong_count,
         "unanswered_count": unanswered_count,
         "wrong_questions": wrong_questions,
+        "incorrect_questions": incorrect_questions,
+        "unanswered_questions": unanswered_questions,
         "total_points": total_points,
         "earned_points": earned_points,
     }
