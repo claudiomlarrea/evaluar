@@ -452,6 +452,9 @@ def ensure_state() -> None:
         "student_code": None,
         "student_step": "identify",
         "student_result": None,
+        "student_exam_payload": None,
+        "student_name": "",
+        "student_dni": "",
         "answer_key_draft": "",
         "exam_wizard_step": "general",
         "exam_wizard_general": {},
@@ -467,8 +470,61 @@ def ensure_state() -> None:
             st.session_state[key] = value
 
 
+@st.cache_data(ttl=120)
+def _cached_teacher_count() -> int:
+    return count_teachers()
+
+
 def _displayed_teacher_count() -> int:
-    return TEACHER_COUNT_BASELINE + count_teachers()
+    try:
+        return TEACHER_COUNT_BASELINE + _cached_teacher_count()
+    except Exception:
+        return TEACHER_COUNT_BASELINE
+
+
+def _get_student_session_payload(code: str) -> dict | None:
+    """Cachea examen/preguntas en session_state para no pegarle a Neon en cada click."""
+    code = code.strip().upper()
+    cached = st.session_state.get("student_exam_payload")
+    if (
+        isinstance(cached, dict)
+        and cached.get("code") == code
+        and cached.get("payload")
+    ):
+        return cached["payload"]
+    payload = get_session_by_code(code)
+    if payload:
+        st.session_state.student_exam_payload = {"code": code, "payload": payload}
+    else:
+        st.session_state.student_exam_payload = None
+    return payload
+
+
+def _collect_student_answers(questions: list) -> dict[str, str]:
+    """Junta respuestas de todas las páginas desde session_state (no solo las visibles)."""
+    answers: dict[str, str] = {}
+    for question in questions:
+        order = question["order"]
+        qtype = question["type"]
+        if qtype in ("MULTIPLE_CHOICE", "TRUE_FALSE"):
+            value = st.session_state.get(f"ans_{order}")
+            if value is not None and str(value).strip():
+                answers[str(order)] = str(value)
+            continue
+        targets, pairs = _load_question_options(question["options"], qtype)
+        matching: dict[str, str] = {}
+        for pair in pairs:
+            left_key = str(pair["left"]).lower()
+            letter = st.session_state.get(f"ans_{order}_{left_key}")
+            if letter:
+                matching[left_key] = letter
+        # Solo incluir matching si hay al menos un ítem marcado
+        if matching:
+            answers[str(order)] = json.dumps(matching)
+        else:
+            # Distinguir "no tocado" de "{}" vacío: ambos son omitidos al corregir
+            answers[str(order)] = ""
+    return answers
 
 
 def _logo_base64() -> str:
@@ -547,6 +603,7 @@ def render_sidebar() -> None:
         st.session_state.page = "student"
         st.session_state.student_step = "identify"
         st.session_state.student_result = None
+        st.session_state.student_exam_payload = None
         st.rerun()
 
     st.sidebar.divider()
@@ -593,6 +650,7 @@ def page_home() -> None:
             st.session_state.page = "student"
             st.session_state.student_step = "identify"
             st.session_state.student_result = None
+            st.session_state.student_exam_payload = None
             st.rerun()
 
 
@@ -1548,7 +1606,20 @@ def page_student() -> None:
         st.warning("Ingresá un código del examen desde la barra lateral.")
         return
 
-    payload = get_session_by_code(code)
+    try:
+        payload = _get_student_session_payload(code)
+    except Exception as exc:
+        st.error(
+            "No se pudo conectar con el servidor. Esperá unos segundos y recargá la página. "
+            "Si ya marcaste respuestas, no cierres la pestaña: se pueden conservar al reconectar."
+        )
+        with st.expander("Detalle técnico"):
+            st.code(str(exc))
+        if st.button("Reintentar conexión", type="primary"):
+            st.session_state.student_exam_payload = None
+            st.rerun()
+        return
+
     if not payload:
         st.error("Código no encontrado. Verificá que sea el correcto.")
         return
@@ -1639,7 +1710,9 @@ def page_student() -> None:
         return
 
     st.markdown("Marcá la opción que elegiste en tu cuadernillo de papel.")
-    answers: dict[str, str] = {}
+    st.caption(
+        "Si la página dice *Connecting*, esperá o recargá: tus marcas en esta pestaña se conservan."
+    )
     page_size = 10
     total_pages = max(1, (len(questions) + page_size - 1) // page_size)
     page_num = st.number_input("Página", min_value=1, max_value=total_pages, value=1)
@@ -1654,32 +1727,27 @@ def page_student() -> None:
         qtype = question["type"]
         if qtype == "MULTIPLE_CHOICE":
             mc_options, _ = _load_question_options(question["options"], qtype)
-            choice = st.radio("Opción", mc_options, key=f"ans_{order}", horizontal=True)
-            answers[str(order)] = choice
+            st.radio("Opción", mc_options, key=f"ans_{order}", horizontal=True)
         elif qtype == "TRUE_FALSE":
-            choice = st.radio(
+            st.radio(
                 "Respuesta",
                 ["V", "F"],
                 format_func=lambda x: "Verdadero" if x == "V" else "Falso",
                 key=f"ans_{order}",
                 horizontal=True,
             )
-            answers[str(order)] = choice
         else:
             targets, pairs = _load_question_options(question["options"], qtype)
-            matching: dict[str, str] = {}
             for pair in pairs:
                 left_key = str(pair["left"]).lower()
-                letter = st.selectbox(
+                st.selectbox(
                     f"Ítem **{pair['left']}** →",
                     ["", *targets],
                     key=f"ans_{order}_{left_key}",
                 )
-                if letter:
-                    matching[left_key] = letter
-            answers[str(order)] = json.dumps(matching)
 
     if page_num == total_pages and st.button("Enviar respuestas", type="primary"):
+        answers = _collect_student_answers(questions)
         try:
             result = submit_answers(
                 code,
@@ -1693,6 +1761,7 @@ def page_student() -> None:
             st.error(str(exc))
         except Exception as exc:
             st.error(f"No se pudieron enviar las respuestas: {exc}")
+            st.info("Si ves *Connecting*, esperá a que vuelva la conexión y volvé a enviar.")
 
 
 def main() -> None:
