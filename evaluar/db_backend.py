@@ -140,7 +140,7 @@ def get_connection() -> Iterator[_SQLiteConnection | _PostgresConnection]:
         import psycopg2
 
         url = _get_database_url() or ""
-        conn = psycopg2.connect(url, connect_timeout=15)
+        conn = psycopg2.connect(url, connect_timeout=8)
         wrapper = _PostgresConnection(conn)
         try:
             yield wrapper

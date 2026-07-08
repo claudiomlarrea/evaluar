@@ -102,8 +102,8 @@ def _bootstrap_db() -> None:
         st.stop()
 
 
-_bootstrap_db()
-
+# No conectar a la DB en import-time: eso clava el redeploy de Streamlit Cloud
+# cuando Neon está dormido. Se inicializa al entrar a main().
 DEFAULT_MC = ["A", "B", "C", "D", "E", "F"]
 
 
@@ -1765,6 +1765,7 @@ def page_student() -> None:
 
 
 def main() -> None:
+    _bootstrap_db()
     ensure_state()
 
     code_param = st.query_params.get("code")
