@@ -803,7 +803,7 @@ def render_header() -> None:
 def render_sidebar() -> None:
     st.sidebar.title("Navegación")
     if st.session_state.teacher:
-        st.sidebar.success(f"Docente: {st.session_state.teacher['name']}")
+        st.sidebar.success(f"Cátedra o Docente: {st.session_state.teacher['name']}")
         if st.sidebar.button("Panel docente", use_container_width=True):
             st.session_state.page = "panel"
             st.rerun()
