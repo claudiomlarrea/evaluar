@@ -66,11 +66,11 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
 INSTITUTION_NAME = "Universidad Católica de Cuyo"
-BG_MAIN = "#EAF3EF"
-BG_SIDEBAR = "#E2ECE7"
+BG_MAIN = "#D5E9E2"
+BG_SIDEBAR = "#C6E0D6"
 BG_SURFACE = "#FFFFFF"
 BRAND_GREEN = "#044A30"
-BORDER_SOFT = "#D4E5DE"
+BORDER_SOFT = "#B8D4C8"
 st.set_page_config(
     page_title="EvaluAR",
     page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "📝",
