@@ -1068,6 +1068,10 @@ def _load_exam_drafts_from_db(exam_id: str, teacher_id: str) -> bool:
     return True
 
 
+def _wizard_page_for_question(question_number: int) -> int:
+    return (question_number - 1) // QUESTIONS_PER_PAGE + 1
+
+
 def _prepare_question_page(question_count: int, current_page: int) -> tuple[int, int]:
     """Sincroniza borradores ↔ widgets al cambiar de página del asistente."""
     _ensure_exam_question_drafts(question_count)
@@ -1387,11 +1391,42 @@ def page_new_exam() -> None:
             f"{'1 pt/pregunta' if general.get('scoring_mode') == 'equal' else 'puntaje manual'}"
         )
 
-        st.progress(min(current_page / total_pages, 1.0))
-        st.write(f"Configurando preguntas **{start}** a **{end}** de **{question_count}**")
+        jump_num, jump_btn, jump_info = st.columns([2, 1, 3])
+        with jump_num:
+            goto_question = st.number_input(
+                "Ir a pregunta",
+                min_value=1,
+                max_value=question_count,
+                value=start,
+                step=1,
+                key="wizard_goto_question",
+            )
+        with jump_btn:
+            st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+            goto_clicked = st.button("Ir →", use_container_width=True, key="wizard_goto_btn")
+        with jump_info:
+            st.caption(
+                f"Página **{current_page}** de **{total_pages}** · "
+                f"mostrando preguntas **{start}–{end}**"
+            )
 
+        if goto_clicked:
+            target = int(goto_question)
+            target_page = _wizard_page_for_question(target)
+            if target_page != current_page:
+                _flush_question_page_to_drafts(start, end)
+                st.session_state.exam_wizard_page = target_page
+            st.session_state.wizard_focus_question = target
+            st.rerun()
+
+        st.progress(min(current_page / total_pages, 1.0))
+
+        focus_question = st.session_state.pop("wizard_focus_question", None)
         for number in range(start, end + 1):
-            with st.expander(f"Pregunta {number}", expanded=False):
+            with st.expander(
+                f"Pregunta {number}",
+                expanded=(focus_question == number),
+            ):
                 _render_question_editor(number)
 
         nav1, nav2, nav3, nav4 = st.columns(4)
