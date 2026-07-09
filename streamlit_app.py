@@ -66,6 +66,9 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
 INSTITUTION_NAME = "Universidad Católica de Cuyo"
+BG_MAIN = "#F4F8F6"
+BG_SIDEBAR = "#EEF4F1"
+BRAND_GREEN = "#044A30"
 st.set_page_config(
     page_title="EvaluAR",
     page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "📝",
@@ -130,6 +133,29 @@ def _bootstrap_db() -> None:
         with st.expander("Detalle del error (para soporte)"):
             st.code(str(last_exc))
     st.stop()
+
+
+def _inject_brand_theme() -> None:
+    """Fondo suave alineado al verde institucional (#044A30)."""
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-color: {BG_MAIN};
+        }}
+        section[data-testid="stSidebar"] {{
+            background-color: {BG_SIDEBAR};
+        }}
+        section[data-testid="stSidebar"] > div {{
+            background-color: {BG_SIDEBAR};
+        }}
+        .main .block-container {{
+            background-color: transparent;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # No conectar a la DB en import-time: eso clava el redeploy de Streamlit Cloud
@@ -2204,6 +2230,7 @@ def main() -> None:
             st.session_state.student_code = str(code_param).upper()
             st.session_state.page = "student"
 
+    _inject_brand_theme()
     render_header()
     render_sidebar()
 
