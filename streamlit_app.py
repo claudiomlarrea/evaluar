@@ -1391,7 +1391,36 @@ def page_new_exam() -> None:
             f"{'1 pt/pregunta' if general.get('scoring_mode') == 'equal' else 'puntaje manual'}"
         )
 
-        jump_num, jump_btn, jump_info = st.columns([2, 1, 3])
+        st.progress(min(current_page / total_pages, 1.0))
+        st.caption(
+            f"Página **{current_page}** de **{total_pages}** · "
+            f"preguntas **{start}–{end}** de **{question_count}**"
+        )
+
+        focus_question = st.session_state.pop("wizard_focus_question", None)
+        for number in range(start, end + 1):
+            with st.expander(
+                f"Pregunta {number}",
+                expanded=(focus_question == number),
+            ):
+                _render_question_editor(number)
+
+        nav1, nav2, jump_num, jump_btn, nav3, nav4 = st.columns([1, 1, 1, 0.5, 1, 1])
+        with nav1:
+            if st.button("← Datos generales", use_container_width=True):
+                _flush_question_page_to_drafts(start, end)
+                st.session_state.exam_wizard_step = "general"
+                st.session_state.exam_wizard_last_page = None
+                st.rerun()
+        with nav2:
+            if st.button(
+                "← Página anterior",
+                use_container_width=True,
+                disabled=current_page <= 1,
+            ):
+                _flush_question_page_to_drafts(start, end)
+                st.session_state.exam_wizard_page = current_page - 1
+                st.rerun()
         with jump_num:
             goto_question = st.number_input(
                 "Ir a pregunta",
@@ -1404,51 +1433,18 @@ def page_new_exam() -> None:
         with jump_btn:
             st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
             goto_clicked = st.button("Ir →", use_container_width=True, key="wizard_goto_btn")
-        with jump_info:
-            st.caption(
-                f"Página **{current_page}** de **{total_pages}** · "
-                f"mostrando preguntas **{start}–{end}**"
-            )
-
-        if goto_clicked:
-            target = int(goto_question)
-            target_page = _wizard_page_for_question(target)
-            if target_page != current_page:
-                _flush_question_page_to_drafts(start, end)
-                st.session_state.exam_wizard_page = target_page
-            st.session_state.wizard_focus_question = target
-            st.rerun()
-
-        st.progress(min(current_page / total_pages, 1.0))
-
-        focus_question = st.session_state.pop("wizard_focus_question", None)
-        for number in range(start, end + 1):
-            with st.expander(
-                f"Pregunta {number}",
-                expanded=(focus_question == number),
-            ):
-                _render_question_editor(number)
-
-        nav1, nav2, nav3, nav4 = st.columns(4)
-        with nav1:
-            if st.button("← Datos generales"):
-                _flush_question_page_to_drafts(start, end)
-                st.session_state.exam_wizard_step = "general"
-                st.session_state.exam_wizard_last_page = None
-                st.rerun()
-        with nav2:
-            if current_page > 1 and st.button("← Página anterior"):
-                _flush_question_page_to_drafts(start, end)
-                st.session_state.exam_wizard_page = current_page - 1
-                st.rerun()
         with nav3:
-            if current_page < total_pages and st.button("Página siguiente →"):
+            if st.button(
+                "Página siguiente →",
+                use_container_width=True,
+                disabled=current_page >= total_pages,
+            ):
                 _flush_question_page_to_drafts(start, end)
                 st.session_state.exam_wizard_page = current_page + 1
                 st.rerun()
         with nav4:
             save_label = "Guardar cambios" if editing else "Crear examen"
-            if st.button(save_label, type="primary"):
+            if st.button(save_label, type="primary", use_container_width=True):
                 try:
                     drafts = _collect_all_question_drafts(question_count, start, end)
                     questions = build_all_questions(drafts)
@@ -1499,6 +1495,14 @@ def page_new_exam() -> None:
                 except Exception as exc:
                     st.error(f"No se pudo guardar el examen: {exc}")
 
+        if goto_clicked:
+            target = int(goto_question)
+            target_page = _wizard_page_for_question(target)
+            if target_page != current_page:
+                _flush_question_page_to_drafts(start, end)
+                st.session_state.exam_wizard_page = target_page
+            st.session_state.wizard_focus_question = target
+            st.rerun()
 
 
 def page_exam_detail() -> None:
