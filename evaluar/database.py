@@ -229,13 +229,34 @@ def increment_usage_count() -> int:
 
 
 def register_teacher(name: str, pin: str) -> dict[str, Any]:
+    cleaned = name.strip()
+    if not cleaned:
+        raise ValueError("Ingresá un nombre para la cátedra o docente.")
     teacher_id = generate_id()
     with get_connection() as conn:
-        conn.execute(
-            "INSERT INTO teachers (id, name, pin_hash, created_at) VALUES (?, ?, ?, ?)",
-            (teacher_id, name.strip(), hash_pin(pin), utc_now()),
-        )
-    return {"id": teacher_id, "name": name.strip()}
+        existing = conn.execute(
+            "SELECT id FROM teachers WHERE name = ?",
+            (cleaned,),
+        ).fetchone()
+        if existing:
+            raise ValueError(
+                "Ese nombre ya está registrado en EvaluAR. Elegí uno más específico, "
+                "por ejemplo «Inmunología-Medicina-UCCuyo»."
+            )
+        try:
+            conn.execute(
+                "INSERT INTO teachers (id, name, pin_hash, created_at) VALUES (?, ?, ?, ?)",
+                (teacher_id, cleaned, hash_pin(pin), utc_now()),
+            )
+        except Exception as exc:
+            message = str(exc).lower()
+            if "unique" in message or "duplicate" in message:
+                raise ValueError(
+                    "Ese nombre ya está registrado en EvaluAR. Elegí uno más específico, "
+                    "por ejemplo «Inmunología-Medicina-UCCuyo»."
+                ) from exc
+            raise
+    return {"id": teacher_id, "name": cleaned}
 
 
 def login_teacher(name: str, pin: str) -> dict[str, Any] | None:

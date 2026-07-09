@@ -891,7 +891,11 @@ def page_auth() -> None:
     tab_login, tab_register = st.tabs(["Iniciar sesión", "Crear cuenta"])
 
     with tab_login:
-        name = st.text_input("Nombre completo", key="login_name")
+        name = st.text_input(
+            "Nombre de cátedra o docente",
+            placeholder="Ej. Inmunología-Medicina-UCCuyo",
+            key="login_name",
+        )
         pin = st.text_input("PIN", type="password", key="login_pin")
         if st.button("Ingresar", type="primary"):
             try:
@@ -909,10 +913,20 @@ def page_auth() -> None:
                     st.rerun()
 
     with tab_register:
-        name = st.text_input("Nombre completo", key="register_name")
+        st.caption(
+            "Si son varios docentes en la misma cátedra, creen **una sola cuenta** compartida. "
+            "Usá un nombre único con materia e institución (ej. «Anatomía-UCCuyo»)."
+        )
+        name = st.text_input(
+            "Nombre de cátedra o docente",
+            placeholder="Ej. Inmunología-Medicina-UCCuyo",
+            key="register_name",
+        )
         pin = st.text_input("PIN (mínimo 4 caracteres)", type="password", key="register_pin")
         if st.button("Crear cuenta", type="primary"):
-            if len(pin.strip()) < 4:
+            if not name.strip():
+                st.error("Ingresá un nombre para la cátedra o docente.")
+            elif len(pin.strip()) < 4:
                 st.error("El PIN debe tener al menos 4 caracteres.")
             else:
                 try:
@@ -922,6 +936,8 @@ def page_auth() -> None:
                     st.session_state.page = "panel"
                     st.success("Cuenta creada.")
                     st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
                 except Exception as exc:
                     st.error(f"No se pudo registrar: {exc}")
 
