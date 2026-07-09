@@ -102,7 +102,7 @@ USAGE_COUNT_SEED = 327
 
 
 def ensure_migrations() -> None:
-    """Aplica ALTER TABLE pendientes. Debe ejecutarse en cada arranque (no cachear)."""
+    """Aplica ALTER TABLE pendientes (idempotente; se invoca una vez por worker en bootstrap)."""
     with get_connection() as conn:
         _migrate_exams(conn)
         _migrate_submissions(conn)
@@ -326,7 +326,6 @@ def create_exam(
     scoring_mode: str,
     questions: list[dict[str, Any]],
 ) -> str:
-    ensure_migrations()
     exam_id = generate_id()
     with get_connection() as conn:
         conn.execute(
@@ -376,7 +375,6 @@ def update_exam(
     scoring_mode: str,
     questions: list[dict[str, Any]],
 ) -> None:
-    ensure_migrations()
     with get_connection() as conn:
         row = conn.execute(
             "SELECT id FROM exams WHERE id = ? AND teacher_id = ?",

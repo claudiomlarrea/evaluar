@@ -134,22 +134,54 @@ class _SQLiteConnection:
         self._conn.executescript(script)
 
 
+def _open_postgres_connection() -> Any:
+    import psycopg2
+
+    url = _get_database_url() or ""
+    return psycopg2.connect(url, connect_timeout=8)
+
+
+def _session_postgres_connection() -> Any | None:
+    """Reutiliza una conexión por sesión de Streamlit (evita TCP+SSL en cada rerun)."""
+    try:
+        import streamlit as st
+    except Exception:
+        return None
+    if not hasattr(st, "session_state"):
+        return None
+    key = "_evaluar_pg_conn"
+    conn = st.session_state.get(key)
+    if conn is not None and getattr(conn, "closed", 1) == 0:
+        return conn
+    conn = _open_postgres_connection()
+    st.session_state[key] = conn
+    return conn
+
+
 @contextmanager
 def get_connection() -> Iterator[_SQLiteConnection | _PostgresConnection]:
     if using_postgres():
-        import psycopg2
-
-        url = _get_database_url() or ""
-        conn = psycopg2.connect(url, connect_timeout=8)
+        conn = _session_postgres_connection()
+        ephemeral = conn is None
+        if ephemeral:
+            conn = _open_postgres_connection()
         wrapper = _PostgresConnection(conn)
         try:
             yield wrapper
             conn.commit()
         except Exception:
             conn.rollback()
+            if not ephemeral:
+                try:
+                    import streamlit as st
+
+                    st.session_state.pop("_evaluar_pg_conn", None)
+                except Exception:
+                    pass
             raise
         finally:
-            conn.close()
+            if ephemeral:
+                conn.close()
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)

@@ -59,6 +59,8 @@ from evaluar.utils import (
 )
 
 QUESTIONS_PER_PAGE = 10
+# Incrementar cuando se agreguen migraciones en database.py
+MIGRATION_VERSION = 1
 ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
@@ -72,15 +74,16 @@ st.set_page_config(
 
 
 @st.cache_resource
-def _initialize_schema() -> bool:
+def _bootstrap_database(_migration_version: int) -> bool:
+    """Schema + migraciones una sola vez por worker (no en cada rerun de Streamlit)."""
     init_schema()
+    ensure_migrations()
     return True
 
 
 def _bootstrap_db() -> None:
     try:
-        _initialize_schema()
-        ensure_migrations()
+        _bootstrap_database(MIGRATION_VERSION)
     except Exception as exc:
         from evaluar.db_backend import using_postgres
 
@@ -546,10 +549,42 @@ def _clear_question_widget_state() -> None:
         st.session_state.pop(key, None)
 
 
+@st.cache_data(show_spinner=False)
 def _logo_base64() -> str:
     if LOGO_PATH.is_file():
         return base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
     return ""
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_usage_count() -> int:
+    return get_usage_count()
+
+
+def _usage_count_for_sidebar() -> int:
+    cached = st.session_state.get("usage_count_display")
+    if cached is not None:
+        return int(cached)
+    total = _cached_usage_count()
+    st.session_state.usage_count_display = total
+    return total
+
+
+def _bump_usage_count() -> int:
+    total = increment_usage_count()
+    st.session_state.usage_count_display = total
+    _cached_usage_count.clear()
+    return total
+
+
+def _wizard_preview_total(general: dict, question_count: int) -> float:
+    """Puntaje total sin validar todas las preguntas en cada rerun."""
+    if general.get("scoring_mode", "equal") == "equal":
+        return float(question_count)
+    drafts = st.session_state.get("exam_question_drafts") or []
+    if len(drafts) >= question_count:
+        return sum(float(d.get("points", 1)) for d in drafts[:question_count])
+    return float(question_count)
 
 
 def render_header() -> None:
@@ -629,7 +664,7 @@ def render_sidebar() -> None:
         st.rerun()
 
     st.sidebar.divider()
-    usage_total = get_usage_count()
+    usage_total = _usage_count_for_sidebar()
     st.sidebar.caption(f"**{usage_total}** veces se utilizó EvaluAR")
 
 
@@ -688,7 +723,7 @@ def page_auth() -> None:
             if not teacher:
                 st.error("Credenciales incorrectas.")
             else:
-                increment_usage_count()
+                _bump_usage_count()
                 st.session_state.teacher = teacher
                 st.session_state.page = "panel"
                 st.success("Sesión iniciada.")
@@ -703,7 +738,7 @@ def page_auth() -> None:
             else:
                 try:
                     teacher = register_teacher(name, pin)
-                    increment_usage_count()
+                    _bump_usage_count()
                     st.session_state.teacher = teacher
                     st.session_state.page = "panel"
                     st.success("Cuenta creada.")
@@ -1337,11 +1372,7 @@ def page_new_exam() -> None:
         start, end = _prepare_question_page(question_count, current_page)
 
         st.markdown("### 2. Clave de respuestas — pregunta por pregunta")
-        try:
-            preview_drafts = _collect_all_question_drafts(question_count, start, end)
-            preview_total = question_total_points(build_all_questions(preview_drafts))
-        except ValueError:
-            preview_total = float(question_count)
+        preview_total = _wizard_preview_total(general, question_count)
 
         st.info(
             f"**Puntaje total del examen: {format_score(preview_total)} pts** · "
