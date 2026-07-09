@@ -856,9 +856,9 @@ def render_header() -> None:
         )
     else:
         logo_html = (
-            '<div style="background:#044A30;color:white;width:56px;height:56px;'
+            '<div style="background:#044A30;color:white;width:80px;height:80px;'
             'border-radius:50%;display:flex;align-items:center;justify-content:center;'
-            'font-weight:700;">E</div>'
+            'font-weight:700;font-size:1.75rem;">E</div>'
         )
 
     st.markdown(
@@ -866,20 +866,22 @@ def render_header() -> None:
         <style>
         .evaluar-logo {{
             display: block;
-            width: 56px;
-            height: 56px;
+            width: 80px;
+            height: 80px;
             border-radius: 50%;
             object-fit: cover;
             border: 2px solid #044A30;
             box-shadow: 0 2px 8px rgba(4, 74, 48, 0.15);
         }}
         </style>
-        <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:18px;margin-bottom:10px;">
           {logo_html}
           <div>
-            <div style="font-size:1.4rem;font-weight:700;color:#044A30;">EvaluAR</div>
-            <div style="color:#64748b;font-size:0.9rem;">Examen en papel. Corrección digital.</div>
-            <div style="color:#94a3b8;font-size:0.78rem;margin-top:2px;">{obs} · {inst}</div>
+            <div style="font-size:2rem;font-weight:700;color:#044A30;line-height:1.15;">EvaluAR</div>
+            <div style="color:#64748b;font-size:1.05rem;line-height:1.35;margin-top:2px;">
+              Examen en papel. Corrección digital.
+            </div>
+            <div style="color:#94a3b8;font-size:0.92rem;margin-top:4px;line-height:1.35;">{obs} · {inst}</div>
           </div>
         </div>
         """,
