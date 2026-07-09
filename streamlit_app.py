@@ -173,46 +173,50 @@ def _inject_brand_theme() -> None:
         .stAlert {{
             border-radius: 0.5rem;
         }}
-        div[data-testid="stMetric"] {{
-            text-align: center !important;
-            align-items: center !important;
-            justify-content: center !important;
+        .evaluar-metric {{
+            background-color: {BG_SURFACE};
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 0.5rem;
+            padding: 0.85rem 0.5rem 0.75rem;
+            text-align: center;
         }}
-        div[data-testid="stMetric"] > div {{
-            width: 100%;
-            justify-content: center !important;
+        .evaluar-metric-label {{
+            font-size: 0.875rem;
+            color: #475569;
+            text-align: center;
+            line-height: 1.3;
+            margin-bottom: 0.35rem;
         }}
-        [data-testid="stMetricLabel"],
-        [data-testid="stMetric"] label {{
-            width: 100% !important;
-            justify-content: center !important;
-            text-align: center !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-        }}
-        [data-testid="stMetricLabel"] > div {{
-            width: 100%;
-            justify-content: center !important;
-            text-align: center !important;
-        }}
-        [data-testid="stMetricLabel"] p,
-        [data-testid="stMetricLabel"] span,
-        [data-testid="stMetric"] label p {{
-            text-align: center !important;
-            width: 100%;
-            display: block;
-        }}
-        [data-testid="stMetricValue"] {{
-            text-align: center !important;
-            font-size: 1.85rem !important;
-            margin-left: auto !important;
-            margin-right: auto !important;
-            width: 100%;
+        .evaluar-metric-value {{
+            font-size: 1.85rem;
+            font-weight: 600;
+            text-align: center;
+            color: #0f172a;
+            line-height: 1.2;
         }}
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_metric_card(label: str, value: str | int | float) -> None:
+    st.markdown(
+        f"""
+        <div class="evaluar-metric">
+            <div class="evaluar-metric-label">{html.escape(str(label))}</div>
+            <div class="evaluar-metric-value">{html.escape(str(value))}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_metrics_row(items: list[tuple[str, str | int | float]]) -> None:
+    cols = st.columns(len(items))
+    for col, (label, value) in zip(cols, items):
+        with col:
+            _render_metric_card(label, value)
 
 
 # No conectar a la DB en import-time: eso clava el redeploy de Streamlit Cloud
@@ -1936,11 +1940,14 @@ def page_exam_detail() -> None:
         active = sessions[selected_index]
         session_open = is_session_open(active)
 
-        metric1, metric2, metric3, metric4 = st.columns(4)
-        metric1.metric("Código para alumnos", active["code"])
-        metric2.metric("Respuestas cargadas", active["submission_count"])
-        metric3.metric("Estado del código", "Abierto" if session_open else "Cerrado")
-        metric4.metric("Nota máxima", exam["max_score"])
+        _render_metrics_row(
+            [
+                ("Código para alumnos", active["code"]),
+                ("Respuestas cargadas", active["submission_count"]),
+                ("Estado del código", "Abierto" if session_open else "Cerrado"),
+                ("Nota máxima", format_score(float(exam["max_score"]))),
+            ]
+        )
 
         if st.button("Ver planilla de notas y descargar Excel", type="primary"):
             st.session_state.session_id = active["id"]
@@ -2030,16 +2037,22 @@ def page_session_results() -> None:
     avg = 0 if not submissions else sum(s["score"] for s in submissions) / len(submissions)
     if pass_min is not None and submissions:
         approved = sum(1 for s in submissions if float(s["score"]) >= pass_min)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Alumnos evaluados", len(submissions))
-        c2.metric("Aprobados", approved)
-        c3.metric("Promedio", format_grade(avg))
-        c4.metric("Nota mínima", format_grade(pass_min))
+        _render_metrics_row(
+            [
+                ("Alumnos evaluados", len(submissions)),
+                ("Aprobados", approved),
+                ("Promedio", format_grade(avg)),
+                ("Nota mínima", format_grade(pass_min)),
+            ]
+        )
     else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Alumnos evaluados", len(submissions))
-        c2.metric("Promedio", format_grade(avg))
-        c3.metric("Nota máxima", exam["max_score"])
+        _render_metrics_row(
+            [
+                ("Alumnos evaluados", len(submissions)),
+                ("Promedio", format_grade(avg)),
+                ("Nota máxima", format_score(float(exam["max_score"]))),
+            ]
+        )
 
     if submissions:
         df = _submissions_dataframe(submissions, float(exam["max_score"]), pass_min)
@@ -2132,7 +2145,10 @@ def page_student() -> None:
     if st.session_state.student_result:
         result = st.session_state.student_result
         st.success("Respuestas enviadas correctamente.")
-        st.metric("Tu nota", f"{format_grade(result['score'])} / {format_grade(result['max_score'])}")
+        _render_metric_card(
+            "Tu nota",
+            f"{format_grade(result['score'])} / {format_grade(result['max_score'])}",
+        )
         pass_min = result.get("pass_min_score")
         status = passing_status(float(result["score"]), pass_min)
         if status is not None:
@@ -2149,10 +2165,13 @@ def page_student() -> None:
                     float(result["score"]),
                 )
             )
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Aciertos", result["correct_count"])
-        c2.metric("Errores", result["wrong_count"])
-        c3.metric("Sin responder", result["unanswered_count"])
+        _render_metrics_row(
+            [
+                ("Aciertos", result["correct_count"]),
+                ("Errores", result["wrong_count"]),
+                ("Sin responder", result["unanswered_count"]),
+            ]
+        )
         if result.get("show_detail", True):
             incorrect_nums = result.get("incorrect_questions")
             unanswered_nums = result.get("unanswered_questions")
