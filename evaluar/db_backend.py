@@ -107,12 +107,36 @@ class _PostgresConnection:
     def __init__(self, conn: Any) -> None:
         self._conn = conn
 
+    def _reconnect(self) -> None:
+        _clear_session_postgres_connection()
+        self._conn = _open_postgres_connection()
+        try:
+            import streamlit as st
+
+            if hasattr(st, "session_state"):
+                st.session_state["_evaluar_pg_conn"] = self._conn
+        except Exception:
+            pass
+
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _PostgresCursor:
+        from psycopg2 import InterfaceError, OperationalError
         from psycopg2.extras import RealDictCursor
 
-        cursor = self._conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(_adapt_sql(sql), params)
-        return _PostgresCursor(cursor)
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                cursor = self._conn.cursor(cursor_factory=RealDictCursor)
+                cursor.execute(_adapt_sql(sql), params)
+                return _PostgresCursor(cursor)
+            except (InterfaceError, OperationalError) as exc:
+                last_exc = exc
+                if attempt == 0:
+                    self._reconnect()
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("No se pudo ejecutar la consulta.")
 
     def executescript(self, script: str) -> None:
         cursor = self._conn.cursor()
@@ -141,47 +165,71 @@ def _open_postgres_connection() -> Any:
     return psycopg2.connect(url, connect_timeout=8)
 
 
-def _session_postgres_connection() -> Any | None:
-    """Reutiliza una conexión por sesión de Streamlit (evita TCP+SSL en cada rerun)."""
+def _clear_session_postgres_connection() -> None:
     try:
         import streamlit as st
+
+        conn = st.session_state.pop("_evaluar_pg_conn", None)
+        if conn is not None and getattr(conn, "closed", 1) == 0:
+            try:
+                conn.close()
+            except Exception:
+                pass
     except Exception:
-        return None
-    if not hasattr(st, "session_state"):
-        return None
-    key = "_evaluar_pg_conn"
-    conn = st.session_state.get(key)
-    if conn is not None and getattr(conn, "closed", 1) == 0:
-        return conn
-    conn = _open_postgres_connection()
-    st.session_state[key] = conn
-    return conn
+        pass
+
+
+def _postgres_connection_alive(conn: Any) -> bool:
+    if conn is None or getattr(conn, "closed", 1) != 0:
+        return False
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+def _safe_postgres_rollback(conn: Any) -> None:
+    try:
+        if conn is not None and getattr(conn, "closed", 1) == 0:
+            conn.rollback()
+    except Exception:
+        pass
+
+
+def _acquire_postgres_connection() -> tuple[Any, bool]:
+    """Devuelve (conexión, reutilizada_en_sesión)."""
+    try:
+        import streamlit as st
+
+        if hasattr(st, "session_state"):
+            key = "_evaluar_pg_conn"
+            conn = st.session_state.get(key)
+            if _postgres_connection_alive(conn):
+                return conn, True
+            _clear_session_postgres_connection()
+            conn = _open_postgres_connection()
+            st.session_state[key] = conn
+            return conn, True
+    except Exception:
+        pass
+    return _open_postgres_connection(), False
 
 
 @contextmanager
 def get_connection() -> Iterator[_SQLiteConnection | _PostgresConnection]:
     if using_postgres():
-        conn = _session_postgres_connection()
-        ephemeral = conn is None
-        if ephemeral:
-            conn = _open_postgres_connection()
+        conn, session_cached = _acquire_postgres_connection()
         wrapper = _PostgresConnection(conn)
         try:
             yield wrapper
             conn.commit()
         except Exception:
-            conn.rollback()
-            if not ephemeral:
-                try:
-                    import streamlit as st
-
-                    st.session_state.pop("_evaluar_pg_conn", None)
-                except Exception:
-                    pass
+            _safe_postgres_rollback(conn)
+            if session_cached:
+                _clear_session_postgres_connection()
             raise
-        finally:
-            if ephemeral:
-                conn.close()
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
