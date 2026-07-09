@@ -67,6 +67,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS app_stats (
+    key TEXT PRIMARY KEY,
+    value INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS submissions (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
@@ -92,11 +97,16 @@ def init_schema() -> None:
         conn.executescript(SCHEMA_SQL)
 
 
+USAGE_COUNT_KEY = "usage_count"
+USAGE_COUNT_SEED = 327
+
+
 def ensure_migrations() -> None:
     """Aplica ALTER TABLE pendientes. Debe ejecutarse en cada arranque (no cachear)."""
     with get_connection() as conn:
         _migrate_exams(conn)
         _migrate_submissions(conn)
+        _migrate_app_stats(conn)
 
 
 def init_db() -> None:
@@ -164,6 +174,58 @@ def count_teachers() -> int:
     with get_connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM teachers").fetchone()
     return int(first_value(row))
+
+
+def _migrate_app_stats(conn: Any) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_stats (
+            key TEXT PRIMARY KEY,
+            value INTEGER NOT NULL
+        )
+        """
+    )
+    row = conn.execute(
+        "SELECT value FROM app_stats WHERE key = ?",
+        (USAGE_COUNT_KEY,),
+    ).fetchone()
+    if not row:
+        conn.execute(
+            "INSERT INTO app_stats (key, value) VALUES (?, ?)",
+            (USAGE_COUNT_KEY, USAGE_COUNT_SEED),
+        )
+
+
+def get_usage_count() -> int:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_stats WHERE key = ?",
+            (USAGE_COUNT_KEY,),
+        ).fetchone()
+    if not row:
+        return USAGE_COUNT_SEED
+    return int(first_value(row))
+
+
+def increment_usage_count() -> int:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_stats WHERE key = ?",
+            (USAGE_COUNT_KEY,),
+        ).fetchone()
+        if not row:
+            new_value = USAGE_COUNT_SEED + 1
+            conn.execute(
+                "INSERT INTO app_stats (key, value) VALUES (?, ?)",
+                (USAGE_COUNT_KEY, new_value),
+            )
+            return new_value
+        new_value = int(first_value(row)) + 1
+        conn.execute(
+            "UPDATE app_stats SET value = ? WHERE key = ?",
+            (new_value, USAGE_COUNT_KEY),
+        )
+    return new_value
 
 
 def register_teacher(name: str, pin: str) -> dict[str, Any]:

@@ -16,7 +16,8 @@ import streamlit.components.v1 as components
 
 from evaluar.database import (
     clear_all_exam_data,
-    count_teachers,
+    get_usage_count,
+    increment_usage_count,
     create_exam,
     create_session,
     duplicate_exam,
@@ -62,8 +63,6 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
 INSTITUTION_NAME = "Universidad Católica de Cuyo"
-TEACHER_COUNT_BASELINE = 326
-
 st.set_page_config(
     page_title="EvaluAR",
     page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "📝",
@@ -482,18 +481,6 @@ def ensure_state() -> None:
             st.session_state[key] = value
 
 
-@st.cache_data(ttl=120)
-def _cached_teacher_count() -> int:
-    return count_teachers()
-
-
-def _displayed_teacher_count() -> int:
-    try:
-        return TEACHER_COUNT_BASELINE + _cached_teacher_count()
-    except Exception:
-        return TEACHER_COUNT_BASELINE
-
-
 def _get_student_session_payload(code: str) -> dict | None:
     """Cachea examen/preguntas en session_state para no pegarle a Neon en cada click."""
     code = code.strip().upper()
@@ -642,9 +629,8 @@ def render_sidebar() -> None:
         st.rerun()
 
     st.sidebar.divider()
-    teacher_total = _displayed_teacher_count()
-    label = "docente usa" if teacher_total == 1 else "docentes usan"
-    st.sidebar.caption(f"**{teacher_total}** {label} EvaluAR")
+    usage_total = get_usage_count()
+    st.sidebar.caption(f"**{usage_total}** veces se utilizó EvaluAR")
 
 
 def page_home() -> None:
@@ -702,6 +688,7 @@ def page_auth() -> None:
             if not teacher:
                 st.error("Credenciales incorrectas.")
             else:
+                increment_usage_count()
                 st.session_state.teacher = teacher
                 st.session_state.page = "panel"
                 st.success("Sesión iniciada.")
@@ -716,6 +703,7 @@ def page_auth() -> None:
             else:
                 try:
                     teacher = register_teacher(name, pin)
+                    increment_usage_count()
                     st.session_state.teacher = teacher
                     st.session_state.page = "panel"
                     st.success("Cuenta creada.")
