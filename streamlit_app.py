@@ -165,6 +165,22 @@ def _submissions_dataframe(
     return pd.DataFrame(rows)
 
 
+def _question_stats_dataframe(question_stats: list[dict]) -> pd.DataFrame:
+    rows = []
+    for stat in question_stats:
+        rows.append(
+            {
+                "Pregunta": stat["order"],
+                "Tipo": question_type_label(stat["type"]),
+                "Aciertos": stat["correct"],
+                "Errores": stat["incorrect"],
+                "Sin responder": stat["unanswered"],
+                "% de acierto": stat["success_rate"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _export_excel(df: pd.DataFrame) -> bytes:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -1780,7 +1796,11 @@ def page_session_results() -> None:
         )
 
     st.markdown("### Estadísticas por pregunta")
-    st.dataframe(pd.DataFrame(data["question_stats"]), use_container_width=True, hide_index=True)
+    st.dataframe(
+        _question_stats_dataframe(data["question_stats"]),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def page_student() -> None:
