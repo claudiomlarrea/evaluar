@@ -625,6 +625,9 @@ def submit_answers(
     if not dni:
         raise ValueError("DNI o matrícula inválido.")
 
+    result = grade_submission(questions, answers, float(exam["max_score"]))
+    submission_id = generate_id()
+
     with get_connection() as conn:
         existing = conn.execute(
             "SELECT id FROM submissions WHERE session_id = ? AND student_dni = ?",
@@ -633,10 +636,6 @@ def submit_answers(
         if existing:
             raise ValueError("Ya enviaste tus respuestas para este examen.")
 
-    result = grade_submission(questions, answers, float(exam["max_score"]))
-    submission_id = generate_id()
-
-    with get_connection() as conn:
         conn.execute(
             """
             INSERT INTO submissions (

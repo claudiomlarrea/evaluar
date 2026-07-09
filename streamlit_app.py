@@ -6,6 +6,7 @@ import io
 import json
 import base64
 import html
+import time as time_module
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
@@ -82,34 +83,53 @@ def _bootstrap_database(_migration_version: int) -> bool:
 
 
 def _bootstrap_db() -> None:
-    try:
-        _bootstrap_database(MIGRATION_VERSION)
-    except Exception as exc:
-        from evaluar.db_backend import using_postgres
+    from evaluar.db_backend import using_postgres
 
-        if not using_postgres():
-            raise
-        st.error("No se pudo conectar a PostgreSQL. Revisá la configuración en Streamlit Secrets.")
-        st.markdown(
-            """
-            En [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets**,
-            debe haber **una sola línea** como esta (con la URL que copiaste de Neon):
+    delays = (0.0, 1.5, 3.0, 5.0)
+    last_exc: Exception | None = None
+    for delay in delays:
+        if delay:
+            time_module.sleep(delay)
+        try:
+            _bootstrap_database(MIGRATION_VERSION)
+            return
+        except Exception as exc:
+            last_exc = exc
+            _bootstrap_database.clear()
 
-            ```
-            DATABASE_URL = "postgresql://neondb_owner:TU_CONTRASEÑA@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"
-            ```
+    if not using_postgres():
+        if last_exc:
+            raise last_exc
+        return
 
-            **Checklist:**
-            1. En Neon → **Dashboard** → activá **Pooled connection** → **Copy snippet** (contraseña visible).
-            2. Pegá la URL **completa** entre comillas dobles.
-            3. Sin espacios antes ni después del `=`.
-            4. Si la contraseña tiene símbolos raros (`@`, `#`, `/`), en Neon generá una contraseña nueva (solo letras y números).
-            5. **Save** en Secrets y **Reboot app**.
-            """
-        )
+    st.error(
+        "No se pudo conectar a la base de datos. Esperá unos segundos y tocá **Reintentar**. "
+        "Si el problema continúa, revisá la configuración en Streamlit Secrets."
+    )
+    if st.button("Reintentar conexión", type="primary", key="bootstrap_retry"):
+        _bootstrap_database.clear()
+        st.rerun()
+    st.markdown(
+        """
+        En [share.streamlit.io](https://share.streamlit.io) → tu app → **Settings** → **Secrets**,
+        debe haber **una sola línea** como esta (con la URL que copiaste de Neon):
+
+        ```
+        DATABASE_URL = "postgresql://neondb_owner:TU_CONTRASEÑA@ep-xxxx.us-east-1.aws.neon.tech/neondb?sslmode=require"
+        ```
+
+        **Checklist:**
+        1. En Neon → **Dashboard** → activá **Pooled connection** → **Copy snippet** (contraseña visible).
+        2. Pegá la URL **completa** entre comillas dobles.
+        3. Sin espacios antes ni después del `=`.
+        4. Si la contraseña tiene símbolos raros (`@`, `#`, `/`), en Neon generá una contraseña nueva (solo letras y números).
+        5. **Save** en Secrets y **Reboot app**.
+        """
+    )
+    if last_exc:
         with st.expander("Detalle del error (para soporte)"):
-            st.code(str(exc))
-        st.stop()
+            st.code(str(last_exc))
+    st.stop()
 
 
 # No conectar a la DB en import-time: eso clava el redeploy de Streamlit Cloud
@@ -577,19 +597,40 @@ def _cached_usage_count() -> int:
     return get_usage_count()
 
 
+def _render_db_error(context: str, exc: Exception | None = None, retry_key: str = "db_retry") -> None:
+    st.error(
+        f"No se pudo {context}. La base de datos puede estar reconectando "
+        "(normal tras unos segundos de inactividad). **Esperá 5 segundos y tocá Reintentar.**"
+    )
+    if exc is not None:
+        with st.expander("Detalle técnico"):
+            st.code(str(exc))
+    if st.button("Reintentar", type="primary", key=retry_key):
+        st.rerun()
+
+
 def _usage_count_for_sidebar() -> int:
     cached = st.session_state.get("usage_count_display")
     if cached is not None:
         return int(cached)
-    total = _cached_usage_count()
+    try:
+        total = _cached_usage_count()
+    except Exception:
+        return int(cached or 0)
     st.session_state.usage_count_display = total
     return total
 
 
 def _bump_usage_count() -> int:
-    total = increment_usage_count()
+    try:
+        total = increment_usage_count()
+    except Exception:
+        return int(st.session_state.get("usage_count_display") or 0)
     st.session_state.usage_count_display = total
-    _cached_usage_count.clear()
+    try:
+        _cached_usage_count.clear()
+    except Exception:
+        pass
     return total
 
 
@@ -735,15 +776,19 @@ def page_auth() -> None:
         name = st.text_input("Nombre completo", key="login_name")
         pin = st.text_input("PIN", type="password", key="login_pin")
         if st.button("Ingresar", type="primary"):
-            teacher = login_teacher(name, pin)
-            if not teacher:
-                st.error("Credenciales incorrectas.")
+            try:
+                teacher = login_teacher(name, pin)
+            except Exception as exc:
+                _render_db_error("iniciar sesión", exc, retry_key="login_retry")
             else:
-                _bump_usage_count()
-                st.session_state.teacher = teacher
-                st.session_state.page = "panel"
-                st.success("Sesión iniciada.")
-                st.rerun()
+                if not teacher:
+                    st.error("Credenciales incorrectas.")
+                else:
+                    _bump_usage_count()
+                    st.session_state.teacher = teacher
+                    st.session_state.page = "panel"
+                    st.success("Sesión iniciada.")
+                    st.rerun()
 
     with tab_register:
         name = st.text_input("Nombre completo", key="register_name")
@@ -777,7 +822,12 @@ def page_panel() -> None:
         st.session_state.page = "new_exam"
         st.rerun()
 
-    exams = list_exams(st.session_state.teacher["id"])
+    try:
+        exams = list_exams(st.session_state.teacher["id"])
+    except Exception as exc:
+        _render_db_error("cargar tus exámenes", exc, retry_key="panel_retry")
+        return
+
     if not exams:
         st.info("Todavía no hay exámenes. Creá el primero con la clave de respuestas.")
     else:
@@ -815,7 +865,10 @@ def page_panel() -> None:
                 with col_d:
                     if st.button("Eliminar", key=f"del_exam_{exam['id']}", use_container_width=True):
                         st.session_state[f"confirm_delete_exam_{exam['id']}"] = True
-                full_exam = get_exam(exam["id"], st.session_state.teacher["id"])
+                try:
+                    full_exam = get_exam(exam["id"], st.session_state.teacher["id"])
+                except Exception:
+                    full_exam = None
                 if full_exam:
                     _render_exam_backup_download(
                         full_exam,
@@ -1527,7 +1580,12 @@ def page_exam_detail() -> None:
         st.rerun()
         return
 
-    exam = get_exam(st.session_state.exam_id, st.session_state.teacher["id"])
+    exam = None
+    try:
+        exam = get_exam(st.session_state.exam_id, st.session_state.teacher["id"])
+    except Exception as exc:
+        _render_db_error("cargar el examen", exc, retry_key="exam_detail_retry")
+        return
     if not exam:
         st.error("Examen no encontrado.")
         return
@@ -1717,7 +1775,11 @@ def page_session_results() -> None:
         st.rerun()
         return
 
-    data = get_session_results(st.session_state.session_id, st.session_state.teacher["id"])
+    try:
+        data = get_session_results(st.session_state.session_id, st.session_state.teacher["id"])
+    except Exception as exc:
+        _render_db_error("cargar los resultados de la sesión", exc, retry_key="session_results_retry")
+        return
     if not data:
         st.error("Sesión no encontrada.")
         return
@@ -2005,9 +2067,12 @@ def page_student() -> None:
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
-            except Exception as exc:
-                st.error(f"No se pudieron enviar las respuestas: {exc}")
-                st.info("Si ves *Connecting*, esperá a que vuelva la conexión y volvé a enviar.")
+            except Exception:
+                st.error(
+                    "No se pudieron enviar las respuestas. La conexión puede estar reconectando. "
+                    "Esperá unos segundos y volvé a tocar **Enviar respuestas** (tus respuestas "
+                    "siguen en pantalla)."
+                )
 
 
 def main() -> None:
@@ -2026,22 +2091,25 @@ def main() -> None:
     render_sidebar()
 
     page = st.session_state.page
-    if page == "home":
-        page_home()
-    elif page == "auth":
-        page_auth()
-    elif page == "panel":
-        page_panel()
-    elif page == "new_exam":
-        page_new_exam()
-    elif page == "exam_detail":
-        page_exam_detail()
-    elif page == "session_results":
-        page_session_results()
-    elif page == "student":
-        page_student()
-    else:
-        page_home()
+    try:
+        if page == "home":
+            page_home()
+        elif page == "auth":
+            page_auth()
+        elif page == "panel":
+            page_panel()
+        elif page == "new_exam":
+            page_new_exam()
+        elif page == "exam_detail":
+            page_exam_detail()
+        elif page == "session_results":
+            page_session_results()
+        elif page == "student":
+            page_student()
+        else:
+            page_home()
+    except Exception as exc:
+        _render_db_error("completar esta acción", exc, retry_key="main_retry")
 
 
 if __name__ == "__main__":

@@ -5,11 +5,17 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
+
+# Neon puede tardar en despertar; reintentamos antes de fallar.
+CONNECT_TIMEOUT = 15
+CONNECT_RETRY_DELAYS = (0.0, 0.8, 1.6, 3.0)
+QUERY_RETRY_ATTEMPTS = 3
 
 
 def _get_database_url() -> str | None:
@@ -92,6 +98,58 @@ def row_to_dict(row: Any) -> dict[str, Any] | None:
     return dict(row)
 
 
+def _postgres_connection_errors() -> tuple[type[BaseException], ...]:
+    import psycopg2
+
+    return (psycopg2.InterfaceError, psycopg2.OperationalError)
+
+
+def _open_postgres_connection() -> Any:
+    import psycopg2
+
+    url = _get_database_url() or ""
+    return psycopg2.connect(url, connect_timeout=CONNECT_TIMEOUT)
+
+
+def _connect_postgres_with_retry() -> Any:
+    """Conexión nueva por operación, con reintentos (Neon cold start / red)."""
+    last_exc: Exception | None = None
+    for delay in CONNECT_RETRY_DELAYS:
+        if delay:
+            time.sleep(delay)
+        conn = None
+        try:
+            conn = _open_postgres_connection()
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            return conn
+        except _postgres_connection_errors() as exc:
+            last_exc = exc
+            _safe_postgres_close(conn)
+        except Exception as exc:
+            last_exc = exc
+            _safe_postgres_close(conn)
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("No se pudo conectar a PostgreSQL.")
+
+
+def _safe_postgres_rollback(conn: Any) -> None:
+    try:
+        if conn is not None and getattr(conn, "closed", 1) == 0:
+            conn.rollback()
+    except Exception:
+        pass
+
+
+def _safe_postgres_close(conn: Any) -> None:
+    try:
+        if conn is not None and getattr(conn, "closed", 1) == 0:
+            conn.close()
+    except Exception:
+        pass
+
+
 class _PostgresCursor:
     def __init__(self, cursor: Any) -> None:
         self._cursor = cursor
@@ -107,31 +165,23 @@ class _PostgresConnection:
     def __init__(self, conn: Any) -> None:
         self._conn = conn
 
-    def _reconnect(self) -> None:
-        _clear_session_postgres_connection()
-        self._conn = _open_postgres_connection()
-        try:
-            import streamlit as st
-
-            if hasattr(st, "session_state"):
-                st.session_state["_evaluar_pg_conn"] = self._conn
-        except Exception:
-            pass
+    def _replace_connection(self) -> None:
+        _safe_postgres_close(self._conn)
+        self._conn = _connect_postgres_with_retry()
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _PostgresCursor:
-        from psycopg2 import InterfaceError, OperationalError
         from psycopg2.extras import RealDictCursor
 
         last_exc: Exception | None = None
-        for attempt in range(2):
+        for attempt in range(QUERY_RETRY_ATTEMPTS):
             try:
                 cursor = self._conn.cursor(cursor_factory=RealDictCursor)
                 cursor.execute(_adapt_sql(sql), params)
                 return _PostgresCursor(cursor)
-            except (InterfaceError, OperationalError) as exc:
+            except _postgres_connection_errors() as exc:
                 last_exc = exc
-                if attempt == 0:
-                    self._reconnect()
+                if attempt < QUERY_RETRY_ATTEMPTS - 1:
+                    self._replace_connection()
                     continue
                 raise
         if last_exc:
@@ -139,12 +189,25 @@ class _PostgresConnection:
         raise RuntimeError("No se pudo ejecutar la consulta.")
 
     def executescript(self, script: str) -> None:
-        cursor = self._conn.cursor()
-        for statement in script.split(";"):
-            chunk = statement.strip()
-            if chunk:
-                cursor.execute(_adapt_sql(chunk))
-        cursor.close()
+        last_exc: Exception | None = None
+        for attempt in range(QUERY_RETRY_ATTEMPTS):
+            try:
+                cursor = self._conn.cursor()
+                for statement in script.split(";"):
+                    chunk = statement.strip()
+                    if chunk:
+                        cursor.execute(_adapt_sql(chunk))
+                cursor.close()
+                return
+            except _postgres_connection_errors() as exc:
+                last_exc = exc
+                if attempt < QUERY_RETRY_ATTEMPTS - 1:
+                    self._replace_connection()
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("No se pudo ejecutar el script SQL.")
 
 
 class _SQLiteConnection:
@@ -158,78 +221,19 @@ class _SQLiteConnection:
         self._conn.executescript(script)
 
 
-def _open_postgres_connection() -> Any:
-    import psycopg2
-
-    url = _get_database_url() or ""
-    return psycopg2.connect(url, connect_timeout=8)
-
-
-def _clear_session_postgres_connection() -> None:
-    try:
-        import streamlit as st
-
-        conn = st.session_state.pop("_evaluar_pg_conn", None)
-        if conn is not None and getattr(conn, "closed", 1) == 0:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
-def _postgres_connection_alive(conn: Any) -> bool:
-    if conn is None or getattr(conn, "closed", 1) != 0:
-        return False
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT 1")
-        return True
-    except Exception:
-        return False
-
-
-def _safe_postgres_rollback(conn: Any) -> None:
-    try:
-        if conn is not None and getattr(conn, "closed", 1) == 0:
-            conn.rollback()
-    except Exception:
-        pass
-
-
-def _acquire_postgres_connection() -> tuple[Any, bool]:
-    """Devuelve (conexión, reutilizada_en_sesión)."""
-    try:
-        import streamlit as st
-
-        if hasattr(st, "session_state"):
-            key = "_evaluar_pg_conn"
-            conn = st.session_state.get(key)
-            if _postgres_connection_alive(conn):
-                return conn, True
-            _clear_session_postgres_connection()
-            conn = _open_postgres_connection()
-            st.session_state[key] = conn
-            return conn, True
-    except Exception:
-        pass
-    return _open_postgres_connection(), False
-
-
 @contextmanager
 def get_connection() -> Iterator[_SQLiteConnection | _PostgresConnection]:
     if using_postgres():
-        conn, session_cached = _acquire_postgres_connection()
+        conn = _connect_postgres_with_retry()
         wrapper = _PostgresConnection(conn)
         try:
             yield wrapper
             conn.commit()
         except Exception:
             _safe_postgres_rollback(conn)
-            if session_cached:
-                _clear_session_postgres_connection()
             raise
+        finally:
+            _safe_postgres_close(conn)
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
