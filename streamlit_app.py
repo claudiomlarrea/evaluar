@@ -502,6 +502,7 @@ def ensure_state() -> None:
         "student_name": "",
         "student_dni": "",
         "student_page_num": 1,
+        "student_answer_code": None,
         "answer_key_draft": "",
         "exam_wizard_step": "general",
         "exam_wizard_general": {},
@@ -538,6 +539,20 @@ def _get_student_session_payload(code: str) -> dict | None:
     return payload
 
 
+def _clear_student_answer_widgets() -> None:
+    for key in list(st.session_state.keys()):
+        if key.startswith("ans_"):
+            del st.session_state[key]
+
+
+def _sync_student_answer_state(code: str) -> None:
+    """Limpia respuestas previas al cambiar de código de examen."""
+    code = code.strip().upper()
+    if st.session_state.get("student_answer_code") != code:
+        _clear_student_answer_widgets()
+        st.session_state.student_answer_code = code
+
+
 def _collect_student_answers(questions: list) -> dict[str, str]:
     """Junta respuestas de todas las páginas desde session_state (no solo las visibles)."""
     answers: dict[str, str] = {}
@@ -548,6 +563,8 @@ def _collect_student_answers(questions: list) -> dict[str, str]:
             value = st.session_state.get(f"ans_{order}")
             if value is not None and str(value).strip():
                 answers[str(order)] = str(value)
+            else:
+                answers[str(order)] = ""
             continue
         targets, pairs = _load_question_options(question["options"], qtype)
         matching: dict[str, str] = {}
@@ -718,6 +735,8 @@ def render_sidebar() -> None:
         st.session_state.student_result = None
         st.session_state.student_exam_payload = None
         st.session_state.student_page_num = 1
+        st.session_state.student_answer_code = None
+        _clear_student_answer_widgets()
         st.rerun()
 
     st.sidebar.divider()
@@ -765,6 +784,8 @@ def page_home() -> None:
             st.session_state.student_result = None
             st.session_state.student_exam_payload = None
             st.session_state.student_page_num = 1
+            st.session_state.student_answer_code = None
+            _clear_student_answer_widgets()
             st.rerun()
 
 
@@ -1976,10 +1997,13 @@ def page_student() -> None:
                 st.session_state.student_step = "answers"
                 st.session_state.student_page_num = 1
                 st.session_state.student_exam_payload = None
+                st.session_state.student_answer_code = None
+                _clear_student_answer_widgets()
                 st.rerun()
         return
 
     st.markdown("Marcá la opción que elegiste en tu cuadernillo de papel.")
+    _sync_student_answer_state(code)
     page_size = 10
     total_pages = max(1, (len(questions) + page_size - 1) // page_size)
     current_page = int(st.session_state.get("student_page_num", 1))
@@ -2015,7 +2039,13 @@ def page_student() -> None:
         qtype = question["type"]
         if qtype == "MULTIPLE_CHOICE":
             mc_options, _ = _load_question_options(question["options"], qtype)
-            st.radio("Opción", mc_options, key=f"ans_{order}", horizontal=True)
+            st.radio(
+                "Opción",
+                mc_options,
+                key=f"ans_{order}",
+                horizontal=True,
+                index=None,
+            )
         elif qtype == "TRUE_FALSE":
             st.radio(
                 "Respuesta",
@@ -2023,6 +2053,7 @@ def page_student() -> None:
                 format_func=lambda x: "Verdadero" if x == "V" else "Falso",
                 key=f"ans_{order}",
                 horizontal=True,
+                index=None,
             )
         else:
             targets, pairs = _load_question_options(question["options"], qtype)
@@ -2030,8 +2061,10 @@ def page_student() -> None:
                 left_key = str(pair["left"]).lower()
                 st.selectbox(
                     f"Ítem **{pair['left']}** →",
-                    ["", *targets],
+                    targets,
                     key=f"ans_{order}_{left_key}",
+                    index=None,
+                    placeholder="Seleccioná",
                 )
 
     st.divider()
