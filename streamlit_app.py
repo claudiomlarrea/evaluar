@@ -173,6 +173,27 @@ def _inject_brand_theme() -> None:
         .stAlert {{
             border-radius: 0.5rem;
         }}
+        div[data-testid="stMetric"] {{
+            text-align: center;
+            align-items: center;
+        }}
+        div[data-testid="stMetric"] > div {{
+            width: 100%;
+            justify-content: center;
+        }}
+        [data-testid="stMetricLabel"] {{
+            justify-content: center;
+        }}
+        [data-testid="stMetricLabel"] p {{
+            text-align: center;
+            width: 100%;
+        }}
+        [data-testid="stMetricValue"] {{
+            text-align: center;
+            font-size: 1.85rem !important;
+            margin-left: auto;
+            margin-right: auto;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
