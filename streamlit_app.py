@@ -66,9 +66,11 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
 INSTITUTION_NAME = "Universidad Católica de Cuyo"
-BG_MAIN = "#F4F8F6"
-BG_SIDEBAR = "#EEF4F1"
+BG_MAIN = "#EAF3EF"
+BG_SIDEBAR = "#E2ECE7"
+BG_SURFACE = "#FFFFFF"
 BRAND_GREEN = "#044A30"
+BORDER_SOFT = "#D4E5DE"
 st.set_page_config(
     page_title="EvaluAR",
     page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "📝",
@@ -140,17 +142,36 @@ def _inject_brand_theme() -> None:
     st.markdown(
         f"""
         <style>
-        .stApp {{
-            background-color: {BG_MAIN};
-        }}
-        section[data-testid="stSidebar"] {{
-            background-color: {BG_SIDEBAR};
-        }}
-        section[data-testid="stSidebar"] > div {{
-            background-color: {BG_SIDEBAR};
-        }}
+        .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"],
+        section.main,
+        section.main > div,
         .main .block-container {{
-            background-color: transparent;
+            background-color: {BG_MAIN} !important;
+        }}
+        section[data-testid="stSidebar"],
+        section[data-testid="stSidebar"] > div {{
+            background-color: {BG_SIDEBAR} !important;
+        }}
+        [data-testid="stHeader"] {{
+            background-color: {BG_MAIN} !important;
+        }}
+        [data-testid="stToolbar"] {{
+            background-color: transparent !important;
+        }}
+        details[data-testid="stExpander"],
+        [data-testid="stDataFrame"],
+        div[data-testid="stMetric"] {{
+            background-color: {BG_SURFACE} !important;
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 0.5rem;
+        }}
+        details[data-testid="stExpander"] summary {{
+            background-color: {BG_SURFACE} !important;
+        }}
+        .stAlert {{
+            border-radius: 0.5rem;
         }}
         </style>
         """,
