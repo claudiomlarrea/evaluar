@@ -503,6 +503,7 @@ def ensure_state() -> None:
         "student_dni": "",
         "student_page_num": 1,
         "student_answer_code": None,
+        "student_answers": {},
         "answer_key_draft": "",
         "exam_wizard_step": "general",
         "exam_wizard_general": {},
@@ -543,6 +544,7 @@ def _clear_student_answer_widgets() -> None:
     for key in list(st.session_state.keys()):
         if key.startswith("ans_"):
             del st.session_state[key]
+    st.session_state.student_answers = {}
 
 
 def _sync_student_answer_state(code: str) -> None:
@@ -551,35 +553,130 @@ def _sync_student_answer_state(code: str) -> None:
     if st.session_state.get("student_answer_code") != code:
         _clear_student_answer_widgets()
         st.session_state.student_answer_code = code
+    if not isinstance(st.session_state.get("student_answers"), dict):
+        st.session_state.student_answers = {}
 
 
-def _collect_student_answers(questions: list) -> dict[str, str]:
-    """Junta respuestas de todas las páginas desde session_state (no solo las visibles)."""
-    answers: dict[str, str] = {}
-    for question in questions:
+def _store_student_choice(order: int) -> None:
+    value = st.session_state.get(f"ans_{order}")
+    store = st.session_state.setdefault("student_answers", {})
+    order_key = str(order)
+    if value is not None and str(value).strip():
+        store[order_key] = str(value)
+    else:
+        store.pop(order_key, None)
+
+
+def _store_student_matching_item(order: int, left_key: str) -> None:
+    letter = st.session_state.get(f"ans_{order}_{left_key}")
+    store = st.session_state.setdefault("student_answers", {})
+    order_key = str(order)
+    matching: dict[str, str] = {}
+    if order_key in store:
+        try:
+            parsed = json.loads(store[order_key])
+            if isinstance(parsed, dict):
+                matching = parsed
+        except (json.JSONDecodeError, TypeError):
+            matching = {}
+    if letter:
+        matching[left_key] = str(letter)
+    else:
+        matching.pop(left_key, None)
+    if matching:
+        store[order_key] = json.dumps(matching)
+    else:
+        store.pop(order_key, None)
+
+
+def _flush_student_page_answers(visible_questions: list) -> None:
+    """Respaldo: sincroniza widgets visibles al almacén persistente."""
+    for question in visible_questions:
         order = question["order"]
         qtype = question["type"]
         if qtype in ("MULTIPLE_CHOICE", "TRUE_FALSE"):
-            value = st.session_state.get(f"ans_{order}")
-            if value is not None and str(value).strip():
-                answers[str(order)] = str(value)
-            else:
-                answers[str(order)] = ""
+            _store_student_choice(order)
             continue
-        targets, pairs = _load_question_options(question["options"], qtype)
-        matching: dict[str, str] = {}
+        _, pairs = _load_question_options(question["options"], qtype)
         for pair in pairs:
             left_key = str(pair["left"]).lower()
-            letter = st.session_state.get(f"ans_{order}_{left_key}")
-            if letter:
-                matching[left_key] = letter
-        # Solo incluir matching si hay al menos un ítem marcado
-        if matching:
-            answers[str(order)] = json.dumps(matching)
-        else:
-            # Distinguir "no tocado" de "{}" vacío: ambos son omitidos al corregir
-            answers[str(order)] = ""
-    return answers
+            _store_student_matching_item(order, left_key)
+
+
+def _prepare_student_question_widget(question: dict) -> None:
+    """Restaura en el widget una respuesta guardada al volver a una página."""
+    order = question["order"]
+    qtype = question["type"]
+    stored = st.session_state.get("student_answers", {}).get(str(order))
+    if not stored:
+        return
+    if qtype in ("MULTIPLE_CHOICE", "TRUE_FALSE"):
+        key = f"ans_{order}"
+        if key not in st.session_state:
+            st.session_state[key] = stored
+        return
+    try:
+        matching = json.loads(stored)
+    except (json.JSONDecodeError, TypeError):
+        return
+    if not isinstance(matching, dict):
+        return
+    for left_key, letter in matching.items():
+        widget_key = f"ans_{order}_{left_key}"
+        if widget_key not in st.session_state:
+            st.session_state[widget_key] = letter
+
+
+def _render_student_question(question: dict) -> None:
+    order = question["order"]
+    st.markdown(f"**Pregunta {order}**")
+    if question.get("prompt"):
+        st.caption(question["prompt"])
+    _prepare_student_question_widget(question)
+    qtype = question["type"]
+    if qtype == "MULTIPLE_CHOICE":
+        mc_options, _ = _load_question_options(question["options"], qtype)
+        st.radio(
+            "Opción",
+            mc_options,
+            key=f"ans_{order}",
+            horizontal=True,
+            index=None,
+            on_change=_store_student_choice,
+            args=(order,),
+        )
+    elif qtype == "TRUE_FALSE":
+        st.radio(
+            "Respuesta",
+            ["V", "F"],
+            format_func=lambda x: "Verdadero" if x == "V" else "Falso",
+            key=f"ans_{order}",
+            horizontal=True,
+            index=None,
+            on_change=_store_student_choice,
+            args=(order,),
+        )
+    else:
+        targets, pairs = _load_question_options(question["options"], qtype)
+        for pair in pairs:
+            left_key = str(pair["left"]).lower()
+            st.selectbox(
+                f"Ítem **{pair['left']}** →",
+                targets,
+                key=f"ans_{order}_{left_key}",
+                index=None,
+                placeholder="Seleccioná",
+                on_change=_store_student_matching_item,
+                args=(order, left_key),
+            )
+
+
+def _collect_student_answers(questions: list, visible: list | None = None) -> dict[str, str]:
+    """Junta respuestas desde el almacén persistente (sobrevive al cambio de página)."""
+    if visible:
+        _flush_student_page_answers(visible)
+    store = st.session_state.get("student_answers") or {}
+    return {str(question["order"]): store.get(str(question["order"]), "") for question in questions}
 
 
 def _clear_question_widget_state() -> None:
@@ -2022,50 +2119,19 @@ def page_student() -> None:
     nav_prev, nav_next = st.columns(2)
     with nav_prev:
         if current_page > 1 and st.button("← Página anterior", use_container_width=True):
+            _flush_student_page_answers(visible)
             st.session_state.student_page_num = current_page - 1
             st.rerun()
     with nav_next:
         if current_page < total_pages and st.button(
             "Página siguiente →", use_container_width=True, type="primary"
         ):
+            _flush_student_page_answers(visible)
             st.session_state.student_page_num = current_page + 1
             st.rerun()
 
     for question in visible:
-        order = question["order"]
-        st.markdown(f"**Pregunta {order}**")
-        if question.get("prompt"):
-            st.caption(question["prompt"])
-        qtype = question["type"]
-        if qtype == "MULTIPLE_CHOICE":
-            mc_options, _ = _load_question_options(question["options"], qtype)
-            st.radio(
-                "Opción",
-                mc_options,
-                key=f"ans_{order}",
-                horizontal=True,
-                index=None,
-            )
-        elif qtype == "TRUE_FALSE":
-            st.radio(
-                "Respuesta",
-                ["V", "F"],
-                format_func=lambda x: "Verdadero" if x == "V" else "Falso",
-                key=f"ans_{order}",
-                horizontal=True,
-                index=None,
-            )
-        else:
-            targets, pairs = _load_question_options(question["options"], qtype)
-            for pair in pairs:
-                left_key = str(pair["left"]).lower()
-                st.selectbox(
-                    f"Ítem **{pair['left']}** →",
-                    targets,
-                    key=f"ans_{order}_{left_key}",
-                    index=None,
-                    placeholder="Seleccioná",
-                )
+        _render_student_question(question)
 
     st.divider()
     nav_prev2, nav_next2, nav_send = st.columns([1, 1, 1])
@@ -2073,6 +2139,7 @@ def page_student() -> None:
         if current_page > 1 and st.button(
             "← Anterior", use_container_width=True, key="student_prev_bottom"
         ):
+            _flush_student_page_answers(visible)
             st.session_state.student_page_num = current_page - 1
             st.rerun()
     with nav_next2:
@@ -2082,13 +2149,14 @@ def page_student() -> None:
             type="primary",
             key="student_next_bottom",
         ):
+            _flush_student_page_answers(visible)
             st.session_state.student_page_num = current_page + 1
             st.rerun()
     with nav_send:
         if current_page == total_pages and st.button(
             "Enviar respuestas", type="primary", use_container_width=True
         ):
-            answers = _collect_student_answers(questions)
+            answers = _collect_student_answers(questions, visible)
             try:
                 result = submit_answers(
                     code,
