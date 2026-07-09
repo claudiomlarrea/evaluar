@@ -174,25 +174,40 @@ def _inject_brand_theme() -> None:
             border-radius: 0.5rem;
         }}
         div[data-testid="stMetric"] {{
-            text-align: center;
-            align-items: center;
+            text-align: center !important;
+            align-items: center !important;
+            justify-content: center !important;
         }}
         div[data-testid="stMetric"] > div {{
             width: 100%;
-            justify-content: center;
+            justify-content: center !important;
         }}
-        [data-testid="stMetricLabel"] {{
-            justify-content: center;
+        [data-testid="stMetricLabel"],
+        [data-testid="stMetric"] label {{
+            width: 100% !important;
+            justify-content: center !important;
+            text-align: center !important;
+            margin-left: auto !important;
+            margin-right: auto !important;
         }}
-        [data-testid="stMetricLabel"] p {{
-            text-align: center;
+        [data-testid="stMetricLabel"] > div {{
             width: 100%;
+            justify-content: center !important;
+            text-align: center !important;
+        }}
+        [data-testid="stMetricLabel"] p,
+        [data-testid="stMetricLabel"] span,
+        [data-testid="stMetric"] label p {{
+            text-align: center !important;
+            width: 100%;
+            display: block;
         }}
         [data-testid="stMetricValue"] {{
-            text-align: center;
+            text-align: center !important;
             font-size: 1.85rem !important;
-            margin-left: auto;
-            margin-right: auto;
+            margin-left: auto !important;
+            margin-right: auto !important;
+            width: 100%;
         }}
         </style>
         """,
