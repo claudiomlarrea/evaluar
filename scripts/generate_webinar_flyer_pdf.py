@@ -144,7 +144,7 @@ def build_pdf(output: Path = OUTPUT) -> Path:
 
     c.setFillColor(TEXT)
     c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(w / 2, h - header_h - date_h + 3.2 * mm, "Martes 14 de julio · 18:00 – 19:00 hs")
+    c.drawCentredString(w / 2, h - header_h - date_h + 3.2 * mm, "Martes 14 de julio · 19:00 hs")
 
     y = h - header_h - date_h - 7 * mm
     c.setFillColor(TEXT)

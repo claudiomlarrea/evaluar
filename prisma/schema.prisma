@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Teacher {
+  id        String   @id @default(cuid())
+  name      String
+  pinHash   String
+  exams     Exam[]
+  createdAt DateTime @default(now())
+}
+
+model Exam {
+  id                  String     @id @default(cuid())
+  teacherId           String
+  teacher             Teacher    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  title               String
+  course              String?
+  description         String?
+  maxScore            Float      @default(10)
+  showDetailToStudent Boolean    @default(true)
+  questions           Question[]
+  sessions            Session[]
+  createdAt           DateTime   @default(now())
+}
+
+model Question {
+  id            String @id @default(cuid())
+  examId        String
+  exam          Exam   @relation(fields: [examId], references: [id], onDelete: Cascade)
+  order         Int
+  type          String
+  prompt        String?
+  options       String @default("[]")
+  correctAnswer String
+  points        Float  @default(1)
+
+  @@unique([examId, order])
+}
+
+model Session {
+  id          String       @id @default(cuid())
+  examId      String
+  exam        Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  code        String       @unique
+  label       String?
+  isActive    Boolean      @default(true)
+  opensAt     DateTime?
+  closesAt    DateTime?
+  submissions Submission[]
+  createdAt   DateTime     @default(now())
+}
+
+model Submission {
+  id              String   @id @default(cuid())
+  sessionId       String
+  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentName     String
+  studentDni      String
+  answers         String
+  score           Float
+  correctCount    Int
+  wrongCount      Int
+  unansweredCount Int
+  wrongQuestions  String
+  submittedAt     DateTime @default(now())
+
+  @@unique([sessionId, studentDni])
+}
