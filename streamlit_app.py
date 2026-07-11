@@ -1254,7 +1254,11 @@ def _render_question_editor(question_number: int) -> None:
 
         targets = letters_for_count(int(target_count))
         labels = [chr(ord("a") + index) for index in range(int(item_count))]
-        st.caption("Indicá con qué opción se empareja cada ítem.")
+        st.caption(
+            "Indicá con qué opción se empareja cada ítem. "
+            "Al corregir, cada ítem vale una parte igual del puntaje de la pregunta "
+            "(ej. 4 ítems y 1 pt → 0,25 por ítem correcto)."
+        )
         for label in labels:
             st.selectbox(
                 f"Ítem {label} →",
