@@ -1389,11 +1389,25 @@ def _prepare_question_page(question_count: int, current_page: int) -> tuple[int,
     return start, end
 
 
+def _apply_equal_scoring_to_drafts(question_count: int) -> None:
+    """En modo automático, todas las preguntas valen 1 pt (también las de otras páginas)."""
+    _ensure_exam_question_drafts(question_count)
+    drafts = st.session_state.exam_question_drafts or []
+    for draft in drafts[:question_count]:
+        draft["points"] = 1.0
+
+
 def _collect_all_question_drafts(question_count: int, start: int, end: int) -> list[dict]:
     _flush_question_page_to_drafts(start, end)
     drafts = st.session_state.exam_question_drafts or []
     if len(drafts) < question_count:
         _ensure_exam_question_drafts(question_count)
+        drafts = st.session_state.exam_question_drafts or []
+    scoring_mode = (st.session_state.get("exam_wizard_general") or {}).get(
+        "scoring_mode", "equal"
+    )
+    if scoring_mode == "equal":
+        _apply_equal_scoring_to_drafts(question_count)
         drafts = st.session_state.exam_question_drafts or []
     return drafts[:question_count]
 
@@ -1639,6 +1653,8 @@ def page_new_exam() -> None:
                             _ensure_exam_question_drafts(int(question_count))
                         elif not st.session_state.get("exam_question_drafts"):
                             _ensure_exam_question_drafts(int(question_count))
+                    if scoring_mode == "equal":
+                        _apply_equal_scoring_to_drafts(int(question_count))
                     st.session_state.exam_wizard_step = "questions"
                     st.session_state.exam_wizard_page = 1
                     st.session_state.exam_wizard_last_page = None
