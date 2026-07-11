@@ -1063,23 +1063,55 @@ def _render_exam_reorder(exams: list[dict], teacher_id: str) -> None:
     labels, label_to_id = _exam_drag_items(exams)
     style = """
     .sortable-component {
-        padding: 0.15rem 0 0.6rem 0;
+        padding: 0 !important;
+        margin: 0 !important;
     }
-    .sortable-item {
-        background-color: #d8ebe2;
-        color: #1e293b;
-        border: 1px solid #9fc9b6;
-        border-radius: 8px;
-        padding: 0.65rem 0.85rem;
-        margin: 0.35rem 0;
-        font-weight: 600;
-        cursor: grab;
+    .sortable-component.vertical {
+        align-items: stretch !important;
+        display: block !important;
+    }
+    .sortable-component.vertical .sortable-container {
+        flex-grow: 0 !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+    }
+    .sortable-container-header {
+        display: none !important;
+    }
+    .sortable-container-body {
+        background-color: transparent !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100% !important;
+    }
+    .sortable-item,
+    .sortable-item:hover {
+        background-color: #d8ebe2 !important;
+        color: #1e293b !important;
+        border: 1px solid #9fc9b6 !important;
+        border-radius: 6px !important;
+        height: auto !important;
+        min-height: 0 !important;
+        margin: 3px 0 !important;
+        padding: 0.35rem 0.7rem !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        line-height: 1.25 !important;
+        cursor: grab !important;
+        box-sizing: border-box !important;
+    }
+    .sortable-component.vertical .sortable-item {
+        display: block !important;
+        width: 100% !important;
     }
     .sortable-item:active {
-        cursor: grabbing;
+        cursor: grabbing !important;
     }
     .sortable-item:hover {
-        background-color: #c5e0d4;
+        background-color: #c5e0d4 !important;
     }
     """
     sorted_labels = sort_items(
