@@ -32,6 +32,7 @@ from evaluar.database import (
     list_exams,
     login_teacher,
     register_teacher,
+    reorder_exams,
     set_session_active,
     submit_answers,
     update_exam,
@@ -1031,6 +1032,76 @@ def page_auth() -> None:
                     st.error(f"No se pudo registrar: {exc}")
 
 
+def _exam_drag_items(exams: list[dict]) -> tuple[list[str], dict[str, str]]:
+    """Etiquetas únicas visibles + mapa etiqueta → id de examen."""
+    labels: list[str] = []
+    label_to_id: dict[str, str] = {}
+    for exam in exams:
+        base = f"{exam['title']} · {exam['question_count']} preguntas"
+        label = base
+        n = 2
+        while label in label_to_id:
+            label = f"{base} ({n})"
+            n += 1
+        label_to_id[label] = str(exam["id"])
+        labels.append(label)
+    return labels, label_to_id
+
+
+def _render_exam_reorder(exams: list[dict], teacher_id: str) -> None:
+    """Lista arrastrable para ordenar exámenes; persiste en la base."""
+    try:
+        from streamlit_sortables import sort_items
+    except ImportError:
+        st.caption(
+            "Para reordenar arrastrando, instalá `streamlit-sortables` "
+            "(ya está en requirements.txt)."
+        )
+        return
+
+    st.caption("Arrastrá un examen hacia arriba o abajo para ordenarlos (como carpetas).")
+    labels, label_to_id = _exam_drag_items(exams)
+    style = """
+    .sortable-component {
+        padding: 0.15rem 0 0.6rem 0;
+    }
+    .sortable-item {
+        background-color: #d8ebe2;
+        color: #1e293b;
+        border: 1px solid #9fc9b6;
+        border-radius: 8px;
+        padding: 0.65rem 0.85rem;
+        margin: 0.35rem 0;
+        font-weight: 600;
+        cursor: grab;
+    }
+    .sortable-item:active {
+        cursor: grabbing;
+    }
+    .sortable-item:hover {
+        background-color: #c5e0d4;
+    }
+    """
+    sorted_labels = sort_items(
+        labels,
+        direction="vertical",
+        custom_style=style,
+        key=f"exam_order_{teacher_id}_{len(exams)}",
+    )
+    if not sorted_labels or sorted_labels == labels:
+        return
+    try:
+        ordered_ids = [label_to_id[label] for label in sorted_labels]
+        reorder_exams(teacher_id, ordered_ids)
+    except KeyError:
+        st.warning("No se pudo interpretar el nuevo orden. Recargá el panel.")
+        return
+    except Exception as exc:
+        st.error(f"No se pudo guardar el orden: {exc}")
+        return
+    st.rerun()
+
+
 def page_panel() -> None:
     if not st.session_state.teacher:
         st.session_state.page = "auth"
@@ -1054,6 +1125,7 @@ def page_panel() -> None:
     if not exams:
         st.info("Todavía no hay exámenes. Creá el primero con la clave de respuestas.")
     else:
+        _render_exam_reorder(exams, st.session_state.teacher["id"])
         for exam in exams:
             schedule = format_exam_schedule(exam.get("exam_date"), exam.get("exam_time"))
             with st.expander(f"{exam['title']} · {exam['question_count']} preguntas"):

@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS exams (
     pass_min_score REAL,
     show_detail_to_student INTEGER NOT NULL DEFAULT 1,
     scoring_mode TEXT NOT NULL DEFAULT 'equal',
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     FOREIGN KEY (teacher_id) REFERENCES teachers(id) ON DELETE CASCADE
 );
@@ -120,9 +121,11 @@ def _migrate_exams(conn: Any) -> None:
         for column in columns:
             conn.execute(f"ALTER TABLE exams ADD COLUMN IF NOT EXISTS {column} TEXT")
         conn.execute("ALTER TABLE exams ADD COLUMN IF NOT EXISTS pass_min_score REAL")
+        conn.execute("ALTER TABLE exams ADD COLUMN IF NOT EXISTS sort_order INTEGER")
         conn.execute(
             "UPDATE exams SET scoring_mode = 'equal' WHERE scoring_mode IS NULL OR scoring_mode = ''"
         )
+        _backfill_exam_sort_order(conn)
         return
 
     existing = {row[1] for row in conn.execute("PRAGMA table_info(exams)")}
@@ -132,9 +135,46 @@ def _migrate_exams(conn: Any) -> None:
             conn.execute(f"ALTER TABLE exams ADD COLUMN {column} TEXT{default}")
     if "pass_min_score" not in existing:
         conn.execute("ALTER TABLE exams ADD COLUMN pass_min_score REAL")
+    if "sort_order" not in existing:
+        conn.execute("ALTER TABLE exams ADD COLUMN sort_order INTEGER")
     conn.execute(
         "UPDATE exams SET scoring_mode = 'equal' WHERE scoring_mode IS NULL OR scoring_mode = ''"
     )
+    _backfill_exam_sort_order(conn)
+
+
+def _backfill_exam_sort_order(conn: Any) -> None:
+    """Completa sort_order faltante (orden visual previo: created_at DESC)."""
+    teachers = conn.execute("SELECT DISTINCT teacher_id FROM exams").fetchall()
+    for teacher_row in teachers:
+        teacher_id = first_value(teacher_row)
+        if teacher_id is None and isinstance(teacher_row, (list, tuple)):
+            teacher_id = teacher_row[0]
+        needs = conn.execute(
+            """
+            SELECT COUNT(*) FROM exams
+            WHERE teacher_id = ? AND sort_order IS NULL
+            """,
+            (teacher_id,),
+        ).fetchone()
+        if int(first_value(needs) or 0) == 0:
+            continue
+        exam_rows = conn.execute(
+            """
+            SELECT id FROM exams
+            WHERE teacher_id = ?
+            ORDER BY created_at DESC, id ASC
+            """,
+            (teacher_id,),
+        ).fetchall()
+        for index, exam_row in enumerate(exam_rows):
+            exam_id = first_value(exam_row)
+            if exam_id is None and isinstance(exam_row, (list, tuple)):
+                exam_id = exam_row[0]
+            conn.execute(
+                "UPDATE exams SET sort_order = ? WHERE id = ?",
+                (index, exam_id),
+            )
 
 
 def _migrate_submissions(conn: Any) -> None:
@@ -282,11 +322,37 @@ def list_exams(teacher_id: str) -> list[dict[str, Any]]:
                    (SELECT COUNT(*) FROM sessions s WHERE s.exam_id = e.id) AS session_count
             FROM exams e
             WHERE e.teacher_id = ?
-            ORDER BY e.created_at DESC
+            ORDER BY COALESCE(e.sort_order, 2147483647) ASC, e.created_at DESC, e.id ASC
             """,
             (teacher_id,),
         ).fetchall()
     return [row_to_dict(row) or {} for row in rows]
+
+
+def reorder_exams(teacher_id: str, ordered_ids: list[str]) -> None:
+    """Persiste el orden de exámenes del docente (0 = arriba)."""
+    if not ordered_ids:
+        return
+    with get_connection() as conn:
+        owned_rows = conn.execute(
+            "SELECT id FROM exams WHERE teacher_id = ?",
+            (teacher_id,),
+        ).fetchall()
+        owned: set[str] = set()
+        for row in owned_rows:
+            eid = first_value(row)
+            if eid is None and isinstance(row, (list, tuple)):
+                eid = row[0]
+            if eid is not None:
+                owned.add(str(eid))
+        ordered = [str(eid) for eid in ordered_ids]
+        if set(ordered) != owned:
+            raise ValueError("La lista de exámenes no coincide con la del docente.")
+        for index, exam_id in enumerate(ordered):
+            conn.execute(
+                "UPDATE exams SET sort_order = ? WHERE id = ? AND teacher_id = ?",
+                (index, exam_id, teacher_id),
+            )
 
 
 def _insert_questions(conn: Any, exam_id: str, questions: list[dict[str, Any]]) -> None:
@@ -350,13 +416,17 @@ def create_exam(
     exam_id = generate_id()
     with get_connection() as conn:
         conn.execute(
+            "UPDATE exams SET sort_order = COALESCE(sort_order, 0) + 1 WHERE teacher_id = ?",
+            (teacher_id,),
+        )
+        conn.execute(
             """
             INSERT INTO exams (
                 id, teacher_id, title, course, career, subject, career_year,
                 description, exam_date, exam_time, max_score, pass_min_score,
-                show_detail_to_student, scoring_mode, created_at
+                show_detail_to_student, scoring_mode, sort_order, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 exam_id,
@@ -373,6 +443,7 @@ def create_exam(
                 pass_min_score,
                 1 if show_detail_to_student else 0,
                 scoring_mode,
+                0,
                 utc_now(),
             ),
         )
