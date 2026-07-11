@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any
 
 from evaluar.utils import round_grade
-
-MatchStatus = Literal["correct", "incorrect", "unanswered"]
 
 
 def normalize_answer(value: str) -> str:
@@ -42,10 +40,11 @@ def grade_matching_pairs(
     student_answer: str,
     correct_answer: str | dict[str, str],
     question_points: float,
-) -> tuple[float, MatchStatus, int, int]:
+) -> tuple[float, str, int, int]:
     """Crédito parcial: cada ítem vale question_points / N.
 
     Returns (earned_points, status, pair_total, pair_correct).
+    status: correct | incorrect | unanswered
     """
     correct = parse_stored_answer(correct_answer)
     if not isinstance(correct, dict) or not correct:
