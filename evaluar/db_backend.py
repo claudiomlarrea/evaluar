@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -12,10 +13,13 @@ from typing import Any, Iterator
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
 
-# Neon puede tardar en despertar; reintentamos antes de fallar.
-CONNECT_TIMEOUT = 15
-CONNECT_RETRY_DELAYS = (0.0, 0.8, 1.6, 3.0)
-QUERY_RETRY_ATTEMPTS = 3
+# Neon puede tardar en despertar; reintentamos solo si falla el primer intento.
+CONNECT_TIMEOUT = 12
+CONNECT_RETRY_DELAYS = (0.0, 0.5, 1.5)
+QUERY_RETRY_ATTEMPTS = 2
+
+_pool_lock = threading.Lock()
+_pg_pool: Any | None = None
 
 
 def _get_database_url() -> str | None:
@@ -112,7 +116,7 @@ def _open_postgres_connection() -> Any:
 
 
 def _connect_postgres_with_retry() -> Any:
-    """Conexión nueva por operación, con reintentos (Neon cold start / red)."""
+    """Conexión nueva, con reintentos (Neon cold start / red)."""
     last_exc: Exception | None = None
     for delay in CONNECT_RETRY_DELAYS:
         if delay:
@@ -150,6 +154,72 @@ def _safe_postgres_close(conn: Any) -> None:
         pass
 
 
+def _postgres_alive(conn: Any) -> bool:
+    if conn is None or getattr(conn, "closed", 1) != 0:
+        return False
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+def _get_pg_pool() -> Any:
+    """Pool de conexiones por proceso (evita TCP+SSL en cada click de Streamlit)."""
+    global _pg_pool
+    if _pg_pool is not None:
+        return _pg_pool
+    with _pool_lock:
+        if _pg_pool is not None:
+            return _pg_pool
+        from psycopg2 import pool
+
+        url = _get_database_url() or ""
+        _pg_pool = pool.ThreadedConnectionPool(
+            1,
+            4,
+            url,
+            connect_timeout=CONNECT_TIMEOUT,
+        )
+        return _pg_pool
+
+
+def _borrow_postgres_connection() -> tuple[Any, bool]:
+    """Devuelve (conn, from_pool). Si el pool falla, abre una conexión efímera."""
+    try:
+        pg_pool = _get_pg_pool()
+        conn = pg_pool.getconn()
+        if _postgres_alive(conn):
+            return conn, True
+        try:
+            pg_pool.putconn(conn, close=True)
+        except Exception:
+            _safe_postgres_close(conn)
+        conn = pg_pool.getconn()
+        if _postgres_alive(conn):
+            return conn, True
+        try:
+            pg_pool.putconn(conn, close=True)
+        except Exception:
+            _safe_postgres_close(conn)
+    except Exception:
+        pass
+    return _connect_postgres_with_retry(), False
+
+
+def _return_postgres_connection(conn: Any, from_pool: bool) -> None:
+    if not from_pool:
+        _safe_postgres_close(conn)
+        return
+    try:
+        pg_pool = _get_pg_pool()
+        closed = getattr(conn, "closed", 1) != 0
+        pg_pool.putconn(conn, close=closed)
+    except Exception:
+        _safe_postgres_close(conn)
+
+
 class _PostgresCursor:
     def __init__(self, cursor: Any) -> None:
         self._cursor = cursor
@@ -162,11 +232,19 @@ class _PostgresCursor:
 
 
 class _PostgresConnection:
-    def __init__(self, conn: Any) -> None:
+    def __init__(self, conn: Any, from_pool: bool = False) -> None:
         self._conn = conn
+        self.from_pool = from_pool
 
     def _replace_connection(self) -> None:
-        _safe_postgres_close(self._conn)
+        if self.from_pool:
+            try:
+                _get_pg_pool().putconn(self._conn, close=True)
+            except Exception:
+                _safe_postgres_close(self._conn)
+            self.from_pool = False
+        else:
+            _safe_postgres_close(self._conn)
         self._conn = _connect_postgres_with_retry()
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> _PostgresCursor:
@@ -224,16 +302,24 @@ class _SQLiteConnection:
 @contextmanager
 def get_connection() -> Iterator[_SQLiteConnection | _PostgresConnection]:
     if using_postgres():
-        conn = _connect_postgres_with_retry()
-        wrapper = _PostgresConnection(conn)
+        conn, from_pool = _borrow_postgres_connection()
+        wrapper = _PostgresConnection(conn, from_pool=from_pool)
+        failed = False
         try:
             yield wrapper
-            conn.commit()
+            wrapper._conn.commit()
         except Exception:
-            _safe_postgres_rollback(conn)
+            failed = True
+            _safe_postgres_rollback(wrapper._conn)
             raise
         finally:
-            _safe_postgres_close(conn)
+            if failed and wrapper.from_pool:
+                try:
+                    _get_pg_pool().putconn(wrapper._conn, close=True)
+                except Exception:
+                    _safe_postgres_close(wrapper._conn)
+            else:
+                _return_postgres_connection(wrapper._conn, wrapper.from_pool)
     else:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH)

@@ -1192,15 +1192,10 @@ def page_panel() -> None:
                 with col_d:
                     if st.button("Eliminar", key=f"del_exam_{exam['id']}", use_container_width=True):
                         st.session_state[f"confirm_delete_exam_{exam['id']}"] = True
-                try:
-                    full_exam = get_exam(exam["id"], st.session_state.teacher["id"])
-                except Exception:
-                    full_exam = None
-                if full_exam:
-                    _render_exam_backup_download(
-                        full_exam,
-                        label="Guardar examen en mi computadora (.json)",
-                    )
+                st.caption(
+                    "Para descargar el respaldo `.json`, abrí **Administrar** "
+                    "(evita recargar todos los exámenes en cada click)."
+                )
                 if st.session_state.get(f"confirm_delete_exam_{exam['id']}"):
                     st.warning(
                         "Se eliminará este examen, sus códigos y las respuestas de alumnos. "
