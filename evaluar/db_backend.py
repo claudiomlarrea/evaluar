@@ -116,11 +116,17 @@ def _open_postgres_connection() -> Any:
     import psycopg2
 
     url = _get_database_url() or ""
-    return psycopg2.connect(
-        url,
-        connect_timeout=CONNECT_TIMEOUT,
-        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MS}",
-    )
+    # No pasar statement_timeout en options: el pooler de Neon lo rechaza
+    # ("unsupported startup parameter in options: statement_timeout").
+    conn = psycopg2.connect(url, connect_timeout=CONNECT_TIMEOUT)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(f"SET statement_timeout = {STATEMENT_TIMEOUT_MS}")
+        conn.commit()
+    except Exception:
+        # Si el pooler no admite SET, seguimos igual: la app debe poder registrar/loguear.
+        _safe_postgres_rollback(conn)
+    return conn
 
 
 def _connect_postgres_with_retry() -> Any:
