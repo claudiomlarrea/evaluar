@@ -17,6 +17,9 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
 CONNECT_TIMEOUT = 12
 CONNECT_RETRY_DELAYS = (0.0, 0.5, 1.5)
 QUERY_RETRY_ATTEMPTS = 2
+POOL_MAX_CONN = 4
+# Nunca bloquear el script de Streamlit esperando el pool (síntoma: "... CONNECTING").
+POOL_GET_TIMEOUT = 2.0
 
 _pool_lock = threading.Lock()
 _pg_pool: Any | None = None
@@ -165,7 +168,62 @@ def _postgres_alive(conn: Any) -> bool:
         return False
 
 
-def _get_pg_pool() -> Any:
+class _TimeoutConnectionPool:
+    """Pool LIFO con timeout: si no hay cupo, el caller abre una conexión efímera.
+
+    psycopg2.ThreadedConnectionPool.getconn() espera *sin límite* cuando el pool
+    está agotado o hay fugas; eso congela Streamlit en "... CONNECTING".
+    """
+
+    def __init__(self, dsn: str, maxconn: int = POOL_MAX_CONN) -> None:
+        import queue
+
+        self._dsn = dsn
+        self._maxconn = maxconn
+        self._queue: queue.LifoQueue = queue.LifoQueue(maxconn)
+        self._created = 0
+        self._lock = threading.Lock()
+
+    def getconn(self, timeout: float = POOL_GET_TIMEOUT) -> Any:
+        import queue
+
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        with self._lock:
+            if self._created < self._maxconn:
+                self._created += 1
+                try:
+                    return _open_postgres_connection()
+                except Exception:
+                    self._created -= 1
+                    raise
+
+        try:
+            return self._queue.get(timeout=timeout)
+        except queue.Empty as exc:
+            raise TimeoutError("Postgres pool exhausted") from exc
+
+    def putconn(self, conn: Any, close: bool = False) -> None:
+        if conn is None:
+            return
+        should_close = close or getattr(conn, "closed", 1) != 0
+        if should_close:
+            _safe_postgres_close(conn)
+            with self._lock:
+                self._created = max(0, self._created - 1)
+            return
+        try:
+            self._queue.put_nowait(conn)
+        except Exception:
+            _safe_postgres_close(conn)
+            with self._lock:
+                self._created = max(0, self._created - 1)
+
+
+def _get_pg_pool() -> _TimeoutConnectionPool:
     """Pool de conexiones por proceso (evita TCP+SSL en cada click de Streamlit)."""
     global _pg_pool
     if _pg_pool is not None:
@@ -173,36 +231,31 @@ def _get_pg_pool() -> Any:
     with _pool_lock:
         if _pg_pool is not None:
             return _pg_pool
-        from psycopg2 import pool
-
         url = _get_database_url() or ""
-        _pg_pool = pool.ThreadedConnectionPool(
-            1,
-            4,
-            url,
-            connect_timeout=CONNECT_TIMEOUT,
-        )
+        _pg_pool = _TimeoutConnectionPool(url, maxconn=POOL_MAX_CONN)
         return _pg_pool
 
 
+def _discard_pool_connection(conn: Any) -> None:
+    """Cierra y saca del pool una conexión muerta (sin filtrar el cupo)."""
+    try:
+        _get_pg_pool().putconn(conn, close=True)
+    except Exception:
+        _safe_postgres_close(conn)
+
+
 def _borrow_postgres_connection() -> tuple[Any, bool]:
-    """Devuelve (conn, from_pool). Si el pool falla, abre una conexión efímera."""
+    """Devuelve (conn, from_pool). Si el pool no responde a tiempo, conexión efímera."""
     try:
         pg_pool = _get_pg_pool()
-        conn = pg_pool.getconn()
+        conn = pg_pool.getconn(timeout=POOL_GET_TIMEOUT)
         if _postgres_alive(conn):
             return conn, True
-        try:
-            pg_pool.putconn(conn, close=True)
-        except Exception:
-            _safe_postgres_close(conn)
-        conn = pg_pool.getconn()
+        _discard_pool_connection(conn)
+        conn = pg_pool.getconn(timeout=POOL_GET_TIMEOUT)
         if _postgres_alive(conn):
             return conn, True
-        try:
-            pg_pool.putconn(conn, close=True)
-        except Exception:
-            _safe_postgres_close(conn)
+        _discard_pool_connection(conn)
     except Exception:
         pass
     return _connect_postgres_with_retry(), False

@@ -1516,11 +1516,13 @@ def _collect_all_question_drafts(question_count: int, start: int, end: int) -> l
 
 
 def _begin_edit_exam(exam_id: str, teacher_id: str) -> None:
-    if not _load_exam_drafts_from_db(exam_id, teacher_id):
-        return
     exam = get_exam(exam_id, teacher_id)
     if not exam:
         return
+    _clear_question_widget_state()
+    st.session_state.exam_question_drafts = drafts_from_exam_questions(exam["questions"])
+    st.session_state.exam_questions_source_id = exam_id
+    st.session_state.exam_wizard_last_page = None
     st.session_state.exam_wizard_mode = "edit"
     st.session_state.edit_exam_id = exam_id
     st.session_state.exam_wizard_general = {
