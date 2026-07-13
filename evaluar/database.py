@@ -8,11 +8,17 @@ from typing import Any
 
 from evaluar.db_backend import first_value, get_connection, row_to_dict, using_postgres
 from evaluar.grading import grade_submission
-from evaluar.utils import generate_id, generate_session_code, is_session_open, utc_now
+from evaluar.utils import (
+    generate_id,
+    generate_session_code,
+    is_session_open,
+    normalize_student_id,
+    utc_now,
+)
 
 
 def hash_pin(pin: str) -> str:
-    return hashlib.sha256(pin.encode()).hexdigest()
+    return hashlib.sha256(pin.strip().encode()).hexdigest()
 
 
 SCHEMA_SQL = """
@@ -270,8 +276,11 @@ def increment_usage_count() -> int:
 
 def register_teacher(name: str, pin: str) -> dict[str, Any]:
     cleaned = name.strip()
+    pin = pin.strip()
     if not cleaned:
         raise ValueError("Ingresá un nombre para la cátedra o docente.")
+    if len(pin) < 4:
+        raise ValueError("El PIN debe tener al menos 4 caracteres.")
     teacher_id = generate_id()
     with get_connection() as conn:
         existing = conn.execute(
@@ -308,7 +317,7 @@ def login_teacher(name: str, pin: str) -> dict[str, Any] | None:
     if not row:
         return None
     teacher = row_to_dict(row) or {}
-    if teacher["pin_hash"] != hash_pin(pin):
+    if teacher["pin_hash"] != hash_pin(pin.strip()):
         return None
     return {"id": teacher["id"], "name": teacher["name"]}
 
@@ -713,9 +722,7 @@ def submit_answers(
     if not is_session_open(session):
         raise ValueError("Esta sesión no está abierta para envíos.")
 
-    dni = "".join(ch for ch in student_dni if ch.isdigit())
-    if not dni:
-        raise ValueError("DNI o matrícula inválido.")
+    dni = normalize_student_id(student_dni)
 
     result = grade_submission(questions, answers, float(exam["max_score"]))
     submission_id = generate_id()
@@ -728,30 +735,36 @@ def submit_answers(
         if existing:
             raise ValueError("Ya enviaste tus respuestas para este examen.")
 
-        conn.execute(
-            """
-            INSERT INTO submissions (
-                id, session_id, student_name, student_dni, answers, score,
-                earned_points, total_points,
-                correct_count, wrong_count, unanswered_count, wrong_questions, submitted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                submission_id,
-                session["id"],
-                student_name.strip(),
-                dni,
-                json.dumps(answers),
-                result["score"],
-                result["earned_points"],
-                result["total_points"],
-                result["correct_count"],
-                result["wrong_count"],
-                result["unanswered_count"],
-                json.dumps(result["wrong_questions"]),
-                utc_now(),
-            ),
-        )
+        try:
+            conn.execute(
+                """
+                INSERT INTO submissions (
+                    id, session_id, student_name, student_dni, answers, score,
+                    earned_points, total_points,
+                    correct_count, wrong_count, unanswered_count, wrong_questions, submitted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    submission_id,
+                    session["id"],
+                    student_name.strip(),
+                    dni,
+                    json.dumps(answers),
+                    result["score"],
+                    result["earned_points"],
+                    result["total_points"],
+                    result["correct_count"],
+                    result["wrong_count"],
+                    result["unanswered_count"],
+                    json.dumps(result["wrong_questions"]),
+                    utc_now(),
+                ),
+            )
+        except Exception as exc:
+            message = str(exc).lower()
+            if "unique" in message or "duplicate" in message:
+                raise ValueError("Ya enviaste tus respuestas para este examen.") from exc
+            raise
 
     return {
         "id": submission_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import secrets
 from datetime import datetime
 
@@ -31,12 +32,27 @@ def format_score(score: float) -> str:
 
 
 def round_grade(score: float) -> int:
-    """Nota final del alumno, siempre entera."""
-    return int(round(float(score)))
+    """Nota final del alumno, siempre entera (redondeo mitad hacia arriba).
+
+    Evita el banker's rounding de Python (`round(2.5) == 2`), que en demos
+    con pocas preguntas muestra una nota menor a la esperada.
+    """
+    value = float(score)
+    if value >= 0:
+        return int(math.floor(value + 0.5))
+    return int(math.ceil(value - 0.5))
 
 
 def format_grade(score: float) -> str:
     return str(round_grade(score))
+
+
+def normalize_student_id(raw: str) -> str:
+    """Normaliza DNI/matrícula sin colapsar IDs distintos (A123 ≠ B123)."""
+    cleaned = "".join(ch for ch in raw.strip().upper() if ch.isalnum())
+    if not cleaned:
+        raise ValueError("DNI o matrícula inválido.")
+    return cleaned
 
 
 def format_datetime(value: str | None) -> str:
@@ -72,7 +88,7 @@ def format_grading_summary(
     score: float | None = None,
 ) -> str:
     final = score if score is not None else (
-        0.0 if total_points == 0 else round((earned_points / total_points) * max_score)
+        0.0 if total_points == 0 else round_grade((earned_points / total_points) * max_score)
     )
     return (
         f"{format_score(earned_points)} / {format_score(total_points)} pts · "
@@ -99,7 +115,9 @@ def question_type_label(qtype: str) -> str:
 
 
 def is_session_open(session: dict) -> bool:
-    if not session.get("is_active"):
+    raw_active = session.get("is_active")
+    # Postgres/SQLite pueden devolver bool, int o str.
+    if raw_active in (0, False, "0", "false", "False", None, ""):
         return False
     now = datetime.utcnow()
     opens_at = session.get("opens_at")

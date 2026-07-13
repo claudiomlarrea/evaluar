@@ -55,9 +55,11 @@ from evaluar.utils import (
     format_score,
     default_pass_min_score,
     is_session_open,
+    normalize_student_id,
     passing_status,
     question_total_points,
     question_type_label,
+    round_grade,
 )
 
 QUESTIONS_PER_PAGE = 10
@@ -250,7 +252,7 @@ def _submissions_dataframe(
         row = {
             "Apellido y nombre": s["student_name"],
             "DNI / Matrícula": s["student_dni"],
-            f"Nota (0-{format_grade(max_score)})": round(float(score)),
+            f"Nota (0-{format_grade(max_score)})": round_grade(score),
             "Aciertos": s["correct_count"],
             "Errores": s["wrong_count"],
             "Sin responder": s["unanswered_count"],
@@ -610,19 +612,26 @@ def ensure_state() -> None:
             st.session_state[key] = value
 
 
-def _get_student_session_payload(code: str) -> dict | None:
-    """Cachea examen/preguntas en session_state para no pegarle a Neon en cada click."""
+def _get_student_session_payload(code: str, *, force_refresh: bool = False) -> dict | None:
+    """Cachea examen/preguntas brevemente; refresca para no quedar con sesión cerrada."""
     code = code.strip().upper()
     cached = st.session_state.get("student_exam_payload")
+    now = time_module.time()
     if (
-        isinstance(cached, dict)
+        not force_refresh
+        and isinstance(cached, dict)
         and cached.get("code") == code
         and cached.get("payload")
+        and (now - float(cached.get("fetched_at") or 0)) < 8
     ):
         return cached["payload"]
     payload = get_session_by_code(code)
     if payload:
-        st.session_state.student_exam_payload = {"code": code, "payload": payload}
+        st.session_state.student_exam_payload = {
+            "code": code,
+            "payload": payload,
+            "fetched_at": now,
+        }
     else:
         st.session_state.student_exam_payload = None
     return payload
@@ -2165,7 +2174,7 @@ def page_session_results() -> None:
                 ("Alumnos evaluados", len(submissions)),
                 ("Aprobados", approved),
                 ("Promedio", format_grade(avg)),
-                ("Nota mínima", format_grade(pass_min)),
+                ("Nota mínima", format_score(pass_min)),
             ]
         )
     else:
@@ -2263,6 +2272,13 @@ def page_student() -> None:
 
     if not is_session_open(session):
         st.error("Esta sesión no está abierta para envíos.")
+        st.caption(
+            "Si el docente acaba de abrir el código, tocá **Actualizar** "
+            "(no alcanza con recargar la página)."
+        )
+        if st.button("Actualizar", type="primary", key="student_refresh_closed"):
+            st.session_state.student_exam_payload = None
+            st.rerun()
         return
 
     if st.session_state.student_result:
@@ -2330,14 +2346,19 @@ def page_student() -> None:
             if not name.strip() or not dni.strip():
                 st.error("Completá nombre y DNI.")
             else:
-                st.session_state.student_name = name.strip()
-                st.session_state.student_dni = dni.strip()
-                st.session_state.student_step = "answers"
-                st.session_state.student_page_num = 1
-                st.session_state.student_exam_payload = None
-                st.session_state.student_answer_code = None
-                _clear_student_answer_widgets()
-                st.rerun()
+                try:
+                    normalized_dni = normalize_student_id(dni)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.student_name = name.strip()
+                    st.session_state.student_dni = normalized_dni
+                    st.session_state.student_step = "answers"
+                    st.session_state.student_page_num = 1
+                    st.session_state.student_exam_payload = None
+                    st.session_state.student_answer_code = None
+                    _clear_student_answer_widgets()
+                    st.rerun()
         return
 
     st.markdown("Marcá la opción que elegiste en tu cuadernillo de papel.")
@@ -2425,9 +2446,24 @@ def main() -> None:
     if code_param:
         if isinstance(code_param, list):
             code_param = code_param[0] if code_param else ""
+        code_param = str(code_param).strip()
         if code_param:
-            st.session_state.student_code = str(code_param).upper()
-            st.session_state.page = "student"
+            code_upper = code_param.upper()
+            st.session_state.student_code = code_upper
+            # Consumir ?code= una sola vez: si queda en la URL, Panel/Nuevo examen
+            # no pueden navegar (cada rerun fuerza page=student).
+            if st.session_state.get("_consumed_query_code") != code_upper:
+                st.session_state.page = "student"
+                st.session_state.student_step = "identify"
+                st.session_state.student_result = None
+                st.session_state.student_exam_payload = None
+                st.session_state.student_answer_code = None
+                _clear_student_answer_widgets()
+                st.session_state._consumed_query_code = code_upper
+            try:
+                del st.query_params["code"]
+            except Exception:
+                pass
 
     _inject_brand_theme()
     render_header()

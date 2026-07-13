@@ -17,9 +17,10 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
 CONNECT_TIMEOUT = 12
 CONNECT_RETRY_DELAYS = (0.0, 0.5, 1.5)
 QUERY_RETRY_ATTEMPTS = 2
-POOL_MAX_CONN = 4
+POOL_MAX_CONN = 6
 # Nunca bloquear el script de Streamlit esperando el pool (síntoma: "... CONNECTING").
 POOL_GET_TIMEOUT = 2.0
+STATEMENT_TIMEOUT_MS = 8000
 
 _pool_lock = threading.Lock()
 _pg_pool: Any | None = None
@@ -115,7 +116,11 @@ def _open_postgres_connection() -> Any:
     import psycopg2
 
     url = _get_database_url() or ""
-    return psycopg2.connect(url, connect_timeout=CONNECT_TIMEOUT)
+    return psycopg2.connect(
+        url,
+        connect_timeout=CONNECT_TIMEOUT,
+        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MS}",
+    )
 
 
 def _connect_postgres_with_retry() -> Any:
@@ -129,6 +134,7 @@ def _connect_postgres_with_retry() -> Any:
             conn = _open_postgres_connection()
             with conn.cursor() as cursor:
                 cursor.execute("SELECT 1")
+            _safe_postgres_rollback(conn)
             return conn
         except _postgres_connection_errors() as exc:
             last_exc = exc
@@ -163,6 +169,7 @@ def _postgres_alive(conn: Any) -> bool:
     try:
         with conn.cursor() as cursor:
             cursor.execute("SELECT 1")
+        _safe_postgres_rollback(conn)
         return True
     except Exception:
         return False
@@ -192,14 +199,19 @@ class _TimeoutConnectionPool:
         except queue.Empty:
             pass
 
+        create_new = False
         with self._lock:
             if self._created < self._maxconn:
                 self._created += 1
-                try:
-                    return _open_postgres_connection()
-                except Exception:
-                    self._created -= 1
-                    raise
+                create_new = True
+        if create_new:
+            try:
+                # No retener el lock durante TCP+SSL (Neon cold start).
+                return _open_postgres_connection()
+            except Exception:
+                with self._lock:
+                    self._created = max(0, self._created - 1)
+                raise
 
         try:
             return self._queue.get(timeout=timeout)
