@@ -680,7 +680,47 @@ def delete_exam(exam_id: str, teacher_id: str) -> dict[str, Any] | None:
     return exam
 
 
-def get_session_by_code(code: str) -> dict[str, Any] | None:
+def _question_public_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """Pregunta para el alumno: sin clave de respuestas."""
+    return {
+        "id": row.get("id"),
+        "order": row.get("order"),
+        "type": row.get("type"),
+        "prompt": row.get("prompt"),
+        "options": row.get("options"),
+        "points": row.get("points"),
+    }
+
+
+def get_session_gate_by_code(code: str) -> dict[str, Any] | None:
+    """Metadatos de sesión/examen sin preguntas (para validar código abierto)."""
+    with get_connection() as conn:
+        session = conn.execute(
+            "SELECT * FROM sessions WHERE code = ?",
+            (code.upper(),),
+        ).fetchone()
+        if not session:
+            return None
+        session_dict = row_to_dict(session) or {}
+        exam = conn.execute(
+            """
+            SELECT id, title, career, subject, career_year, max_score,
+                   pass_min_score, show_detail_to_student
+            FROM exams WHERE id = ?
+            """,
+            (session_dict["exam_id"],),
+        ).fetchone()
+    return {
+        "session": session_dict,
+        "exam": row_to_dict(exam) or {},
+    }
+
+
+def get_session_by_code(
+    code: str,
+    *,
+    include_correct_answers: bool = True,
+) -> dict[str, Any] | None:
     with get_connection() as conn:
         session = conn.execute(
             "SELECT * FROM sessions WHERE code = ?",
@@ -698,10 +738,14 @@ def get_session_by_code(code: str) -> dict[str, Any] | None:
             (session_dict["exam_id"],),
         ).fetchall()
 
+    question_rows = [row_to_dict(q) or {} for q in questions]
+    if not include_correct_answers:
+        question_rows = [_question_public_fields(q) for q in question_rows]
+
     return {
         "session": session_dict,
         "exam": row_to_dict(exam) or {},
-        "questions": [row_to_dict(q) or {} for q in questions],
+        "questions": question_rows,
     }
 
 

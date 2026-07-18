@@ -27,6 +27,7 @@ from evaluar.database import (
     ensure_migrations,
     get_exam,
     get_session_by_code,
+    get_session_gate_by_code,
     get_session_results,
     init_schema,
     list_exams,
@@ -594,6 +595,7 @@ def ensure_state() -> None:
         "student_page_num": 1,
         "student_answer_code": None,
         "student_answers": {},
+        "student_submit_locks": {},
         "answer_key_draft": "",
         "exam_wizard_step": "general",
         "exam_wizard_general": {},
@@ -613,7 +615,7 @@ def ensure_state() -> None:
 
 
 def _get_student_session_payload(code: str, *, force_refresh: bool = False) -> dict | None:
-    """Cachea examen/preguntas brevemente; refresca para no quedar con sesión cerrada."""
+    """Cachea examen/preguntas del alumno (sin clave) para no pegarle a Neon en cada click."""
     code = code.strip().upper()
     cached = st.session_state.get("student_exam_payload")
     now = time_module.time()
@@ -622,19 +624,40 @@ def _get_student_session_payload(code: str, *, force_refresh: bool = False) -> d
         and isinstance(cached, dict)
         and cached.get("code") == code
         and cached.get("payload")
+        and cached.get("safe_for_student") is True
         and (now - float(cached.get("fetched_at") or 0)) < 8
     ):
         return cached["payload"]
-    payload = get_session_by_code(code)
+    payload = get_session_by_code(code, include_correct_answers=False)
     if payload:
         st.session_state.student_exam_payload = {
             "code": code,
             "payload": payload,
             "fetched_at": now,
+            "safe_for_student": True,
         }
     else:
         st.session_state.student_exam_payload = None
     return payload
+
+
+def _student_submit_lock(code: str) -> dict | None:
+    locks = st.session_state.get("student_submit_locks") or {}
+    if not isinstance(locks, dict):
+        return None
+    lock = locks.get(code.strip().upper())
+    return lock if isinstance(lock, dict) else None
+
+
+def _set_student_submit_lock(code: str, dni: str, name: str) -> None:
+    locks = st.session_state.setdefault("student_submit_locks", {})
+    if not isinstance(locks, dict):
+        locks = {}
+        st.session_state.student_submit_locks = locks
+    locks[code.strip().upper()] = {
+        "dni": str(dni),
+        "name": str(name),
+    }
 
 
 def _clear_student_answer_widgets() -> None:
@@ -2237,6 +2260,39 @@ def page_student() -> None:
         return
 
     try:
+        gate = get_session_gate_by_code(code)
+    except Exception as exc:
+        st.error(
+            "No se pudo conectar con el servidor. Esperá unos segundos y recargá la página. "
+            "Si ya marcaste respuestas, no cierres la pestaña: se pueden conservar al reconectar."
+        )
+        with st.expander("Detalle técnico"):
+            st.code(str(exc))
+        if st.button("Reintentar conexión", type="primary", key="student_gate_retry"):
+            st.session_state.student_exam_payload = None
+            st.rerun()
+        return
+
+    if not gate:
+        st.error("Código no encontrado. Verificá que sea el correcto.")
+        return
+
+    session_meta = gate["session"]
+    exam_meta = gate["exam"]
+
+    st.subheader(exam_meta.get("title") or "Examen")
+    if not is_session_open(session_meta):
+        st.error("Esta sesión no está abierta para envíos.")
+        st.caption(
+            "Si el docente acaba de abrir el código, tocá **Actualizar** "
+            "(no alcanza con recargar la página)."
+        )
+        if st.button("Actualizar", type="primary", key="student_refresh_closed"):
+            st.session_state.student_exam_payload = None
+            st.rerun()
+        return
+
+    try:
         payload = _get_student_session_payload(code)
     except Exception as exc:
         st.error(
@@ -2258,7 +2314,12 @@ def page_student() -> None:
     exam = payload["exam"]
     questions = payload["questions"]
 
-    st.subheader(exam["title"])
+    if any("correct_answer" in (q or {}) for q in questions):
+        # Defensa en profundidad: nunca dejar la clave en el flujo alumno.
+        st.session_state.student_exam_payload = None
+        payload = _get_student_session_payload(code, force_refresh=True) or payload
+        questions = payload["questions"]
+
     exam_points = question_total_points(questions)
     parts = [
         exam.get("career"),
@@ -2276,7 +2337,7 @@ def page_student() -> None:
             "Si el docente acaba de abrir el código, tocá **Actualizar** "
             "(no alcanza con recargar la página)."
         )
-        if st.button("Actualizar", type="primary", key="student_refresh_closed"):
+        if st.button("Actualizar", type="primary", key="student_refresh_closed_payload"):
             st.session_state.student_exam_payload = None
             st.rerun()
         return
@@ -2339,6 +2400,21 @@ def page_student() -> None:
                     st.success("Todas las preguntas respondidas correctamente.")
         return
 
+    submit_lock = _student_submit_lock(code)
+    if submit_lock:
+        st.warning(
+            "En este navegador ya se envió el examen"
+            + (
+                f" con el DNI/matrícula **{submit_lock.get('dni')}**"
+                if submit_lock.get("dni")
+                else ""
+            )
+            + ". No se puede volver a rendir ni cargar respuestas por otra persona "
+            "desde el mismo dispositivo."
+        )
+        st.caption("Si otro alumno debe cargar, que use su propio teléfono u otra computadora.")
+        return
+
     if st.session_state.student_step == "identify":
         name = st.text_input("Apellido y nombre", placeholder="García, Ana")
         dni = st.text_input("DNI o matrícula", placeholder="45123456")
@@ -2351,14 +2427,21 @@ def page_student() -> None:
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.session_state.student_name = name.strip()
-                    st.session_state.student_dni = normalized_dni
-                    st.session_state.student_step = "answers"
-                    st.session_state.student_page_num = 1
-                    st.session_state.student_exam_payload = None
-                    st.session_state.student_answer_code = None
-                    _clear_student_answer_widgets()
-                    st.rerun()
+                    lock = _student_submit_lock(code)
+                    if lock and str(lock.get("dni")) != normalized_dni:
+                        st.error(
+                            "En este navegador ya se rindió el examen con otro DNI. "
+                            "No se puede cargar respuestas por un compañero desde el mismo dispositivo."
+                        )
+                    else:
+                        st.session_state.student_name = name.strip()
+                        st.session_state.student_dni = normalized_dni
+                        st.session_state.student_step = "answers"
+                        st.session_state.student_page_num = 1
+                        st.session_state.student_exam_payload = None
+                        st.session_state.student_answer_code = None
+                        _clear_student_answer_widgets()
+                        st.rerun()
         return
 
     st.markdown("Marcá la opción que elegiste en tu cuadernillo de papel.")
@@ -2418,24 +2501,37 @@ def page_student() -> None:
         if current_page == total_pages and st.button(
             "Enviar respuestas", type="primary", use_container_width=True
         ):
-            answers = _collect_student_answers(questions, visible)
-            try:
-                result = submit_answers(
-                    code,
-                    st.session_state.student_name,
-                    st.session_state.student_dni,
-                    answers,
-                )
-                st.session_state.student_result = result
-                st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
-            except Exception:
+            lock = _student_submit_lock(code)
+            current_dni = str(st.session_state.student_dni or "")
+            if lock and str(lock.get("dni")) != current_dni:
                 st.error(
-                    "No se pudieron enviar las respuestas. La conexión puede estar reconectando. "
-                    "Esperá unos segundos y volvé a tocar **Enviar respuestas** (tus respuestas "
-                    "siguen en pantalla)."
+                    "En este navegador ya se rindió el examen con otro DNI. "
+                    "No se puede enviar por un compañero desde el mismo dispositivo."
                 )
+            else:
+                answers = _collect_student_answers(questions, visible)
+                try:
+                    result = submit_answers(
+                        code,
+                        st.session_state.student_name,
+                        st.session_state.student_dni,
+                        answers,
+                    )
+                    _set_student_submit_lock(
+                        code,
+                        st.session_state.student_dni,
+                        st.session_state.student_name,
+                    )
+                    st.session_state.student_result = result
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception:
+                    st.error(
+                        "No se pudieron enviar las respuestas. La conexión puede estar reconectando. "
+                        "Esperá unos segundos y volvé a tocar **Enviar respuestas** (tus respuestas "
+                        "siguen en pantalla)."
+                    )
 
 
 def main() -> None:
