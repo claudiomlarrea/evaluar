@@ -70,11 +70,11 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOGO_PATH = ROOT_DIR / "assets" / "logo-observatorio-ia.png"
 OBSERVATORIO_NAME = "Observatorio de Inteligencia Artificial"
 INSTITUTION_NAME = "Universidad Católica de Cuyo"
-BG_MAIN = "#D5E9E2"
-BG_SIDEBAR = "#C6E0D6"
+BG_MAIN = "#C2DFD4"
+BG_SIDEBAR = "#A8CFBE"
 BG_SURFACE = "#FFFFFF"
 BRAND_GREEN = "#044A30"
-BORDER_SOFT = "#B8D4C8"
+BORDER_SOFT = "#8FBFAD"
 st.set_page_config(
     page_title="EvaluAR",
     page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "📝",
@@ -1121,9 +1121,9 @@ def _render_exam_reorder(exams: list[dict], teacher_id: str) -> None:
     }
     .sortable-item,
     .sortable-item:hover {
-        background-color: #d8ebe2 !important;
+        background-color: #b8d9cb !important;
         color: #1e293b !important;
-        border: 1px solid #9fc9b6 !important;
+        border: 1px solid #8fbfad !important;
         border-radius: 6px !important;
         height: auto !important;
         min-height: 0 !important;
@@ -1143,7 +1143,7 @@ def _render_exam_reorder(exams: list[dict], teacher_id: str) -> None:
         cursor: grabbing !important;
     }
     .sortable-item:hover {
-        background-color: #c5e0d4 !important;
+        background-color: #a8cfbe !important;
     }
     """
     sorted_labels = sort_items(
