@@ -198,6 +198,43 @@ def _inject_brand_theme() -> None:
         .stButton > button:focus-visible {{
             box-shadow: 0 0 0 2px rgba(4, 74, 48, 0.12) !important;
         }}
+        /* Campos de texto, selects y sidebar (flujo alumno) — fondo blanco */
+        .stTextInput input,
+        .stTextInput > div > div > input,
+        .stTextArea textarea,
+        .stNumberInput input,
+        [data-testid="stNumberInputField"] input,
+        [data-testid="stSidebar"] .stTextInput input,
+        [data-testid="stSidebar"] .stTextInput > div > div > input {{
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            border: 1px solid {BORDER_SOFT} !important;
+            border-radius: 0.5rem !important;
+        }}
+        div[data-baseweb="select"] > div,
+        div[data-baseweb="select"] [data-baseweb="input"],
+        [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] div[data-baseweb="select"] > div {{
+            background-color: #ffffff !important;
+            border: 1px solid {BORDER_SOFT} !important;
+            border-radius: 0.5rem !important;
+        }}
+        div[data-baseweb="select"] span,
+        div[data-baseweb="select"] [role="combobox"] {{
+            color: #0f172a !important;
+        }}
+        div[role="listbox"],
+        div[role="option"] {{
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+        }}
+        div[role="option"]:hover {{
+            background-color: #f1f5f9 !important;
+        }}
+        [data-testid="stRadio"] label,
+        [data-testid="stRadio"] label span {{
+            color: #0f172a !important;
+        }}
         .stAlert {{
             border-radius: 0.5rem;
         }}
