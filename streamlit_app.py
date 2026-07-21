@@ -231,45 +231,24 @@ def _inject_brand_theme() -> None:
         div[role="option"]:hover {{
             background-color: #f1f5f9 !important;
         }}
-        /* Opciones múltiple / V-F (pocillos del radio) — círculo blanco */
-        [data-testid="stRadio"] [data-baseweb="radio"],
-        [data-testid="stRadio"] [data-baseweb="radio"] > div {{
-            background-color: transparent !important;
-        }}
-        [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child,
-        [data-testid="stRadio"] [data-baseweb="radio"] > div:first-of-type {{
+        /* Opciones múltiple / V-F (pocillos) — Streamlit pinta el inner casi del tamaño del círculo en verde claro */
+        [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child {{
             background-color: #ffffff !important;
             border: 2px solid {BORDER_SOFT} !important;
             box-shadow: none !important;
         }}
-        [data-testid="stRadio"] [data-baseweb="radio"][aria-checked="true"] > div:first-child,
-        [data-testid="stRadio"] [data-baseweb="radio"][aria-checked="true"] > div:first-of-type {{
+        [data-testid="stRadio"] [data-baseweb="radio"] > div:first-child > div {{
+            background-color: transparent !important;
+        }}
+        [data-testid="stRadio"] [data-baseweb="radio"]:has(input:checked) > div:first-child {{
             background-color: #ffffff !important;
             border-color: {BRAND_GREEN} !important;
         }}
-        [data-testid="stRadio"] input[type="radio"] {{
-            appearance: none !important;
-            -webkit-appearance: none !important;
-            width: 1.05rem !important;
-            height: 1.05rem !important;
-            min-width: 1.05rem !important;
-            min-height: 1.05rem !important;
-            border: 2px solid {BORDER_SOFT} !important;
-            border-radius: 50% !important;
-            background-color: #ffffff !important;
-            margin: 0 0.35rem 0 0 !important;
-            vertical-align: middle !important;
-            cursor: pointer !important;
-            flex-shrink: 0 !important;
+        [data-testid="stRadio"] [data-baseweb="radio"]:has(input:checked) > div:first-child > div {{
+            background-color: {BRAND_GREEN} !important;
         }}
-        [data-testid="stRadio"] input[type="radio"]:checked {{
-            border-color: {BRAND_GREEN} !important;
-            background-color: #ffffff !important;
-            box-shadow: inset 0 0 0 3px {BRAND_GREEN} !important;
-        }}
-        [data-testid="stRadio"] label,
-        [data-testid="stRadio"] label span,
-        [data-testid="stRadio"] [data-baseweb="radio"] label {{
+        [data-testid="stRadio"] [data-baseweb="radio"] label,
+        [data-testid="stRadio"] [data-baseweb="radio"] [data-testid="stMarkdownContainer"] {{
             color: #0f172a !important;
             background-color: transparent !important;
         }}
