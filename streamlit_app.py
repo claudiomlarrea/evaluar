@@ -174,6 +174,30 @@ def _inject_brand_theme() -> None:
         details[data-testid="stExpander"] summary {{
             background-color: {BG_SURFACE} !important;
         }}
+        .stButton > button,
+        [data-testid="stBaseButton-secondary"],
+        [data-testid="stBaseButton-primary"],
+        [data-testid="stSidebar"] .stButton > button {{
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            border: 1px solid {BORDER_SOFT} !important;
+            border-radius: 0.75rem !important;
+            box-shadow: none !important;
+        }}
+        .stButton > button:hover,
+        [data-testid="stBaseButton-secondary"]:hover,
+        [data-testid="stBaseButton-primary"]:hover,
+        [data-testid="stSidebar"] .stButton > button:hover {{
+            background: #f8fafc !important;
+            background-color: #f8fafc !important;
+            color: #0f172a !important;
+            border-color: {BORDER_SOFT} !important;
+        }}
+        .stButton > button:focus,
+        .stButton > button:focus-visible {{
+            box-shadow: 0 0 0 2px rgba(4, 74, 48, 0.12) !important;
+        }}
         .stAlert {{
             border-radius: 0.5rem;
         }}
