@@ -1798,8 +1798,9 @@ def page_new_exam() -> None:
             list(scoring_options.keys()),
             index=0 if preset_mode == "equal" else 1,
             help=(
-                "La nota final siempre va de 0 a la nota máxima. "
-                "El sistema calcula: (puntos obtenidos ÷ puntos totales del examen) × nota máxima."
+                "La nota final siempre va de 0 a la nota máxima (entera, sin redondear). "
+                "El sistema calcula: (puntos obtenidos ÷ puntos totales del examen) × nota máxima "
+                "y trunca los decimales (ej. 5,6 → 5)."
             ),
             key=f"wizard_{st.session_state.get('edit_exam_id') if editing else 'create'}_scoring_label",
         )
@@ -1907,7 +1908,8 @@ def page_new_exam() -> None:
         st.info(
             f"**Puntaje total del examen: {format_score(preview_total)} pts** · "
             f"Nota final = (puntos del alumno ÷ {format_score(preview_total)}) × "
-            f"{general['max_score']} (escala 0 a {general['max_score']})."
+            f"{general['max_score']} (escala 0 a {general['max_score']}, "
+            f"entera sin redondear)."
         )
         st.caption(
             f"{general['career']} · {general['subject']} · Año {general['career_year']} · "

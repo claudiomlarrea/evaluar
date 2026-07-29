@@ -32,15 +32,11 @@ def format_score(score: float) -> str:
 
 
 def round_grade(score: float) -> int:
-    """Nota final del alumno, siempre entera (redondeo mitad hacia arriba).
+    """Nota final del alumno, siempre entera (trunca decimales, sin redondear).
 
-    Evita el banker's rounding de Python (`round(2.5) == 2`), que en demos
-    con pocas preguntas muestra una nota menor a la esperada.
+    Ej.: 27/50×10 = 5,4 → 5; 28/50×10 = 5,6 → 5; 30/50×10 = 6,0 → 6.
     """
-    value = float(score)
-    if value >= 0:
-        return int(math.floor(value + 0.5))
-    return int(math.ceil(value - 0.5))
+    return int(math.trunc(float(score)))
 
 
 def format_grade(score: float) -> str:
