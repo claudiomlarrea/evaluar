@@ -1429,9 +1429,10 @@ def _render_question_editor(question_number: int) -> None:
 
     if qtype == "MULTIPLE_CHOICE":
         option_count = st.selectbox(
-            "Cantidad de opciones (distractores)",
-            [3, 4, 5, 6],
+            "Cantidad de opciones",
+            [2, 3, 4, 5, 6],
             key=f"q{question_number}_option_count",
+            help="Ej.: 2 = A/B; 4 = A/B/C/D. Incluye la respuesta correcta.",
         )
         options = letters_for_count(int(option_count))
         st.selectbox(
@@ -1454,13 +1455,13 @@ def _render_question_editor(question_number: int) -> None:
         with col1:
             target_count = st.selectbox(
                 "Cantidad de opciones destino",
-                [3, 4, 5, 6],
+                [2, 3, 4, 5, 6],
                 key=f"q{question_number}_target_count",
             )
         with col2:
             item_count = st.selectbox(
                 "Cantidad de ítems a emparejar",
-                [3, 4, 5, 6],
+                [2, 3, 4, 5, 6],
                 key=f"q{question_number}_item_count",
             )
 

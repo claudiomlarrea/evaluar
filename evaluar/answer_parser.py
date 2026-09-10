@@ -1,16 +1,16 @@
-"""Parser de clave de respuestas con tipos mixtos y 3–6 opciones."""
+"""Parser de clave de respuestas con tipos mixtos y 2–6 opciones."""
 
 from __future__ import annotations
 
 import re
 from typing import Any
 
-MIN_OPTIONS = 3
+MIN_OPTIONS = 2
 MAX_OPTIONS = 6
 ALL_LETTERS = list("ABCDEFGHIJ")
 
 LINE_PATTERN = re.compile(
-    r"^\s*(?:(\d+)(?:/([3-6]))?\s*(?:[:.)-]\s*|\s+))?(.+?)\s*$"
+    r"^\s*(?:(\d+)(?:/([2-6]))?\s*(?:[:.)-]\s*|\s+))?(.+?)\s*$"
 )
 PAIR_PATTERN = re.compile(r"^\s*([a-zA-Z0-9]+)\s*(?:->|:|=)\s*([a-zA-Z0-9]+)\s*$")
 
@@ -68,7 +68,7 @@ def generate_template(
     matching_set = set(matching_questions or [])
     lines = [
         "# Plantilla EvaluAR — completá cada línea",
-        "# /N = cantidad de opciones destino (3 a 6)",
+        "# /N = cantidad de opciones destino (2 a 6)",
         "# MC: letra | V/F: V o F | Emparejamiento: a->c, b->f, c->d",
         "",
     ]
