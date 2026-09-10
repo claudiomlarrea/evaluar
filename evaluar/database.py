@@ -196,25 +196,77 @@ def _migrate_submissions(conn: Any) -> None:
             conn.execute(f"ALTER TABLE submissions ADD COLUMN {column} REAL")
 
 
-def clear_all_exam_data() -> dict[str, int]:
-    """Elimina exámenes, preguntas, códigos y respuestas. Conserva cuentas docentes."""
+def clear_teacher_exam_data(teacher_id: str) -> dict[str, int]:
+    """Elimina exámenes, códigos y respuestas **solo** de una cuenta docente."""
+    teacher_id = str(teacher_id or "").strip()
+    if not teacher_id:
+        raise ValueError("Falta el identificador del docente.")
     with get_connection() as conn:
-        counts = {
-            "submissions": int(first_value(conn.execute("SELECT COUNT(*) FROM submissions").fetchone())),
-            "sessions": int(first_value(conn.execute("SELECT COUNT(*) FROM sessions").fetchone())),
-            "questions": int(first_value(conn.execute("SELECT COUNT(*) FROM questions").fetchone())),
-            "exams": int(first_value(conn.execute("SELECT COUNT(*) FROM exams").fetchone())),
-        }
-        conn.executescript(
-            """
-            DELETE FROM submissions;
-            DELETE FROM sessions;
-            DELETE FROM questions;
-            DELETE FROM exams;
-            """
-        )
-    return counts
+        exam_rows = conn.execute(
+            "SELECT id FROM exams WHERE teacher_id = ?",
+            (teacher_id,),
+        ).fetchall()
+        exam_ids = [str(first_value(row)) for row in exam_rows]
+        if not exam_ids:
+            return {"exams": 0, "sessions": 0, "questions": 0, "submissions": 0}
 
+        placeholders = ",".join("?" for _ in exam_ids)
+        session_rows = conn.execute(
+            f"SELECT id FROM sessions WHERE exam_id IN ({placeholders})",
+            tuple(exam_ids),
+        ).fetchall()
+        session_ids = [str(first_value(row)) for row in session_rows]
+
+        submissions = 0
+        if session_ids:
+            s_ph = ",".join("?" for _ in session_ids)
+            submissions = int(
+                first_value(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM submissions WHERE session_id IN ({s_ph})",
+                        tuple(session_ids),
+                    ).fetchone()
+                )
+            )
+            conn.execute(
+                f"DELETE FROM submissions WHERE session_id IN ({s_ph})",
+                tuple(session_ids),
+            )
+            conn.execute(
+                f"DELETE FROM sessions WHERE id IN ({s_ph})",
+                tuple(session_ids),
+            )
+
+        questions = int(
+            first_value(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM questions WHERE exam_id IN ({placeholders})",
+                    tuple(exam_ids),
+                ).fetchone()
+            )
+        )
+        conn.execute(
+            f"DELETE FROM questions WHERE exam_id IN ({placeholders})",
+            tuple(exam_ids),
+        )
+        conn.execute(
+            f"DELETE FROM exams WHERE id IN ({placeholders})",
+            tuple(exam_ids),
+        )
+        return {
+            "exams": len(exam_ids),
+            "sessions": len(session_ids),
+            "questions": questions,
+            "submissions": submissions,
+        }
+
+
+def clear_all_exam_data() -> dict[str, int]:
+    """Obsoleto: no usar en la UI. Conservado solo por compatibilidad de imports."""
+    raise RuntimeError(
+        "El borrado global de todos los docentes está deshabilitado. "
+        "Usá clear_teacher_exam_data(teacher_id)."
+    )
 
 def count_teachers() -> int:
     with get_connection() as conn:

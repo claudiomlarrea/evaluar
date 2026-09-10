@@ -16,7 +16,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from evaluar.database import (
-    clear_all_exam_data,
+    clear_teacher_exam_data,
     get_usage_count,
     increment_usage_count,
     create_exam,
@@ -382,10 +382,10 @@ def _export_excel(df: pd.DataFrame) -> bytes:
 
 def _render_local_backup_notice() -> None:
     st.info(
-        "**Guardá todo en tu computadora.** EvaluAR usa almacenamiento temporal en la nube: "
-        "descargá y archivá cada **examen** (archivo `.json`) y cada **planilla de notas** "
-        "(Excel o CSV) en tu disco. Así conservás tus claves de respuestas y las notas "
-        "aunque la app se reinicie."
+        "**Tus exámenes quedan guardados en EvaluAR** (base en la nube). "
+        "No hace falta bajar el `.json` para que no se pierdan. "
+        "El archivo `.json` y la planilla Excel son un **respaldo extra** en tu computadora "
+        "(por si querés migrar o archivar fuera del sistema)."
     )
 
 
@@ -1311,8 +1311,8 @@ def page_panel() -> None:
                 )
                 if st.session_state.get(f"confirm_delete_exam_{exam['id']}"):
                     st.warning(
-                        "Se eliminará este examen, sus códigos y las respuestas de alumnos. "
-                        "Descargá el `.json` y la planilla antes si los necesitás."
+                        "Se eliminará **este** examen, sus códigos y las respuestas de alumnos. "
+                        "Si querés conservarlo fuera de EvaluAR, descargá antes el `.json` y la planilla."
                     )
                     confirm = st.text_input(
                         "Escribí ELIMINAR para confirmar",
@@ -1386,26 +1386,28 @@ def page_panel() -> None:
             except Exception as exc:
                 st.error(f"No se pudo importar el examen: {exc}")
 
-    with st.expander("Limpiar datos de prueba"):
+    with st.expander("Eliminar todos mis exámenes de esta cuenta"):
         st.warning(
-            "Elimina **todos** los exámenes, códigos del examen y respuestas de alumnos. "
-            "Las cuentas docentes se conservan."
+            "Borra **solo los exámenes de esta cátedra/docente** (códigos y respuestas incluidas). "
+            "No afecta a otros docentes. Esta acción no se puede deshacer desde la app."
         )
-        confirm = st.text_input("Escribí BORRAR para confirmar", key="clear_exam_data_confirm")
-        if st.button("Eliminar todos los exámenes y códigos"):
+        confirm = st.text_input(
+            "Escribí BORRAR para confirmar",
+            key="clear_exam_data_confirm",
+        )
+        if st.button("Eliminar mis exámenes y códigos"):
             if confirm.strip().upper() != "BORRAR":
                 st.error("Escribí BORRAR para confirmar.")
             else:
-                deleted = clear_all_exam_data()
+                deleted = clear_teacher_exam_data(st.session_state.teacher["id"])
                 st.session_state.exam_id = None
                 st.session_state.session_id = None
                 st.session_state.flash_session_code = None
                 st.success(
                     f"Listo: {deleted['exams']} exámenes, {deleted['sessions']} códigos "
-                    f"y {deleted['submissions']} respuestas eliminados."
+                    f"y {deleted['submissions']} respuestas eliminados de esta cuenta."
                 )
                 st.rerun()
-
 
 def _render_question_editor(question_number: int) -> None:
     scoring_mode = st.session_state.exam_wizard_general.get("scoring_mode", "equal")
@@ -2093,14 +2095,14 @@ def page_exam_detail() -> None:
 
     if st.session_state.pop("flash_download_exam", False):
         st.success(
-            "Examen guardado en EvaluAR. **Descargalo ahora** y guardalo en tu computadora "
-            "para no perder la clave de respuestas."
+            "Examen guardado en EvaluAR. Ya está disponible en tu panel. "
+            "Opcional: descargá el `.json` como respaldo extra en tu computadora."
         )
 
-    st.markdown("### Respaldo en tu computadora")
+    st.markdown("### Respaldo opcional en tu computadora")
     st.caption(
-        "Descargá este archivo `.json` y guardalo en tu disco. Contiene el examen completo "
-        "y la clave de respuestas. Podés restaurarlo desde el panel docente si hace falta."
+        "El examen ya está guardado en EvaluAR. El `.json` es un respaldo extra en tu disco "
+        "(clave incluida). Podés restaurarlo desde el panel docente si hace falta."
     )
     _render_exam_backup_download(exam, label="Descargar examen y clave (.json)")
 
