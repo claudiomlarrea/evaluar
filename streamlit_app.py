@@ -603,6 +603,11 @@ def _render_session_access_control(active: dict, teacher_id: str) -> None:
             key=f"close_session_{active['id']}",
         ):
             set_session_active(active["id"], teacher_id, False)
+            try:
+                _cached_student_gate.clear()
+                _cached_student_exam_payload.clear()
+            except Exception:
+                pass
             st.success("Código cerrado. Los alumnos ya no pueden enviar respuestas.")
             st.rerun()
     else:
@@ -615,6 +620,11 @@ def _render_session_access_control(active: dict, teacher_id: str) -> None:
             key=f"reopen_session_{active['id']}",
         ):
             set_session_active(active["id"], teacher_id, True)
+            try:
+                _cached_student_gate.clear()
+                _cached_student_exam_payload.clear()
+            except Exception:
+                pass
             st.success("Código reabierto.")
             st.rerun()
 
