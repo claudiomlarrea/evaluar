@@ -706,10 +706,10 @@ def _get_student_session_payload(code: str, *, force_refresh: bool = False) -> d
         and cached.get("code") == code
         and cached.get("payload")
         and cached.get("safe_for_student") is True
-        and (now - float(cached.get("fetched_at") or 0)) < 8
+        and (now - float(cached.get("fetched_at") or 0)) < 120
     ):
         return cached["payload"]
-    payload = get_session_by_code(code, include_correct_answers=False)
+    payload = _cached_student_exam_payload(code)
     if payload:
         st.session_state.student_exam_payload = {
             "code": code,
@@ -720,6 +720,49 @@ def _get_student_session_payload(code: str, *, force_refresh: bool = False) -> d
     else:
         st.session_state.student_exam_payload = None
     return payload
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _cached_student_gate(code: str) -> dict | None:
+    """Gate liviano compartido entre alumnos del mismo código (15–45 s)."""
+    return get_session_gate_by_code(code.strip().upper())
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def _cached_student_exam_payload(code: str) -> dict | None:
+    """Preguntas sin clave: una sola lectura de Neon para muchos alumnos concurrentes."""
+    return get_session_by_code(code.strip().upper(), include_correct_answers=False)
+
+
+def _student_load_with_retry(loader, *, attempts: int = 3):
+    """Reintenta ante saturación momentánea (90 alumnos juntos)."""
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return loader()
+        except Exception as exc:
+            last_exc = exc
+            if attempt < attempts - 1:
+                time_module.sleep(0.8 * (attempt + 1))
+    if last_exc:
+        raise last_exc
+    return None
+
+
+def _render_student_busy_error(*, retry_key: str) -> None:
+    st.error(
+        "El servidor está atendiendo a muchos alumnos a la vez. "
+        "**Esperá 10–15 segundos** y tocá **Reintentar**. "
+        "No cierres la pestaña: si ya marcaste respuestas, se conservan al reconectar."
+    )
+    if st.button("Reintentar", type="primary", key=retry_key):
+        st.session_state.student_exam_payload = None
+        try:
+            _cached_student_gate.clear()
+            _cached_student_exam_payload.clear()
+        except Exception:
+            pass
+        st.rerun()
 
 
 def _student_submit_lock(code: str) -> dict | None:
@@ -2346,17 +2389,9 @@ def page_student() -> None:
         return
 
     try:
-        gate = get_session_gate_by_code(code)
-    except Exception as exc:
-        st.error(
-            "No se pudo conectar con el servidor. Esperá unos segundos y recargá la página. "
-            "Si ya marcaste respuestas, no cierres la pestaña: se pueden conservar al reconectar."
-        )
-        with st.expander("Detalle técnico"):
-            st.code(str(exc))
-        if st.button("Reintentar conexión", type="primary", key="student_gate_retry"):
-            st.session_state.student_exam_payload = None
-            st.rerun()
+        gate = _student_load_with_retry(lambda: _cached_student_gate(code))
+    except Exception:
+        _render_student_busy_error(retry_key="student_gate_retry")
         return
 
     if not gate:
@@ -2375,23 +2410,19 @@ def page_student() -> None:
         )
         if st.button("Actualizar", type="primary", key="student_refresh_closed"):
             st.session_state.student_exam_payload = None
+            try:
+                _cached_student_gate.clear()
+                _cached_student_exam_payload.clear()
+            except Exception:
+                pass
             st.rerun()
         return
 
     try:
-        payload = _get_student_session_payload(code)
-    except Exception as exc:
-        st.error(
-            "No se pudo conectar con el servidor. Esperá unos segundos y recargá la página. "
-            "Si ya marcaste respuestas, no cierres la pestaña: se pueden conservar al reconectar."
-        )
-        with st.expander("Detalle técnico"):
-            st.code(str(exc))
-        if st.button("Reintentar conexión", type="primary"):
-            st.session_state.student_exam_payload = None
-            st.rerun()
+        payload = _student_load_with_retry(lambda: _get_student_session_payload(code))
+    except Exception:
+        _render_student_busy_error(retry_key="student_payload_retry")
         return
-
     if not payload:
         st.error("Código no encontrado. Verificá que sea el correcto.")
         return

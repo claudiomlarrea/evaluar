@@ -15,12 +15,13 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "evaluar.db"
 
 # Neon puede tardar en despertar; reintentamos solo si falla el primer intento.
 CONNECT_TIMEOUT = 12
-CONNECT_RETRY_DELAYS = (0.0, 0.5, 1.5)
-QUERY_RETRY_ATTEMPTS = 2
-POOL_MAX_CONN = 6
-# Nunca bloquear el script de Streamlit esperando el pool (síntoma: "... CONNECTING").
-POOL_GET_TIMEOUT = 2.0
-STATEMENT_TIMEOUT_MS = 8000
+CONNECT_RETRY_DELAYS = (0.0, 0.5, 1.5, 3.0)
+QUERY_RETRY_ATTEMPTS = 3
+# 90 alumnos en simultáneo: más cupos por worker Streamlit (Neon pooler tolera esto).
+POOL_MAX_CONN = 20
+# Si el pool está lleno, esperar un poco antes de abrir conexión efímera.
+POOL_GET_TIMEOUT = 3.0
+STATEMENT_TIMEOUT_MS = 12000
 
 _pool_lock = threading.Lock()
 _pg_pool: Any | None = None
